@@ -17,13 +17,14 @@ import pkg/cps
 import std/atomics
 
 const
-  RESUME   =   uint8(1      ) # 0001
-  WRITER   =   uint8(1 shl 1) # 0010
-  READER   =   uint8(1 shl 2) # 0100
-  CONSUMED = READER or WRITER # 0110
-  SLOT     =   uint8(1      ) # 0001
-  DEQ      =   uint8(1 shl 1) # 0010
-  ENQ      =   uint8(1 shl 2) # 0100
+  UNINIT   =   uint8(   0   ) # 0000_0000
+  RESUME   =   uint8(1      ) # 0000_0001
+  WRITER   =   uint8(1 shl 1) # 0000_0010
+  READER   =   uint8(1 shl 2) # 0000_0100
+  CONSUMED = READER or WRITER # 0000_0110
+  SLOT     =   uint8(1      ) # 0000_0001
+  DEQ      =   uint8(1 shl 1) # 0000_0010
+  ENQ      =   uint8(1 shl 2) # 0000_0100
   N      = 1024             # Number of slots per node in the queue
 
   PTR_MASK =   uint8(0      ) # TODO define
@@ -37,26 +38,32 @@ type
   NodePtr = ptr Node
 
   Tag = tuple
-    nptr: NodePtr
-    idx: uint16
+    nptr: NodePtr     # 8 bytes
+    idx: uint16       # 2 bytes
+  TagPtr = ptr Tag
   # Tag = (Node, uint16)
 
   LoonyQueue = object
-    head     : Atomic[uint]     # Pointer to a Tag = (NodePtr, idx)    ## Whereby node contains the slots and idx
-    tail     : Atomic[uint]     # Pointer to a Tag = (NodePtr, idx)    ## is the uint16 index of the slot array
-    currTail : Atomic[uint]     # Current NodePtr
+    head     : Atomic[uint]     # 8 bytes Pointer to a Tag = (NodePtr, idx)    ## Whereby node contains the slots and idx
+    tail     : Atomic[uint]     # 8 bytes Pointer to a Tag = (NodePtr, idx)    ## is the uint16 index of the slot array
+    currTail : Atomic[uint]     # 8 bytes Current NodePtr
   
   ControlBlock = object
-    headMask : Atomic[(uint16, uint16)]     # 
-    tailMask : Atomic[(uint16, uint16)]     # 
-    reclaim  : Atomic[     uint8      ]     # 
+    headMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    tailMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    reclaim  : Atomic[     uint8      ]     #                   1 byte
+const
+  #CONTROLBLOCK MANIP
+  SHIFT = 16      # Shift to access 'high' 16 bits of uint32
+  MASK  = 0xFFFF  # Mask to access 'low' 16 bits of uint32
 
+type
   AdvTail = enum
-    AdvAndInserted, # 0000
-    AdvOnly         # 0001
+    AdvAndInserted, # 0000_0000
+    AdvOnly         # 0000_0001
   AdvHead = enum
-    QueueEmpty,     # 0000
-    Advanced        # 0001
+    QueueEmpty,     # 0000_0000
+    Advanced        # 0000_0001
 
 template prepareElement(el: Continuation): uint =
   (cast[uint](el) or WRITER)  # BIT or
@@ -88,21 +95,50 @@ template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint)
 template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: Tag): bool =
   queue.head.compareExchange(expect, cast[uint](swap))
 
+
 template incrEnqCount(t: NodePtr, v: uint = 0'u) =
   discard # TODO
 template incrDeqCount(t: NodePtr, v: uint = 0'u) =
   discard # TODO
 
+
 proc tryReclaim(idx: uint): Node =
   discard # TODO
+
 
 template deallocNode(x: untyped): untyped =
   discard # TODO
 template allocNode(x: untyped): untyped =
   discard # TODO
 
+
+
+template toNodePtr(pt: uint): NodePtr =
+  cast[NodePtr](pt)
+template toNode(pt: uint): Node =
+  cast[NodePtr](pt)[]
+template toTagPtr(pt: uint): TagPtr =
+  cast[TagPtr](pt)
+template toTag(pt: uint): Tag =
+  cast[TagPtr](pt)[]
+template toUInt(tag: var Tag): uint =
+  cast[uint](tag.addr)
+template toUInt(tagptr: TagPtr | ptr Tag): uint =
+  cast[uint](tagptr)
+template toUInt(node: var Node): uint =
+  cast[uint](node.addr)
+template toUInt(nodeptr: NodePtr | ptr Node): uint =
+  cast[uint](nodeptr)
+template incIdx(tptr: TagPtr) =
+  tptr[][1].inc()
+template incIdx(tag: Tag) =
+  tag[1].inc()
+
+
+
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
-  ## REVIEW
+  ## Reviewd, seems to follow the algorithm correctly and makes logical sense
+  ## TODO DOC
   var null = 0'u
   while true:
     var curr: Tag = queue.fetchTail()
@@ -111,12 +147,12 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
       return AdvOnly
     var next = t.fetchNext()
     if next.isNil():
-      var node = cast[uint](el) # allocNode(el) TODO; allocate mem
+      var node = cast[NodePtr](el).toUInt() # allocNode(el) TODO; allocate mem
       null = 0'u
       if t.compareAndSwapNext(null, node):
         null = 0'u
         var tag: Tag = (nptr: cast[NodePtr](node), idx: 1'u16)
-                  # I don't understand why I'm doing this :/
+                  # I don't understand why I'm doing this :/, like I think I do but not really.
         while not queue.compareAndSwapTail(null, tag): # T11
           if t != curr.nptr:
             t.incrEnqCount()
@@ -136,13 +172,14 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
       return AdvOnly
 
 proc advHead(queue: var LoonyQueue, curr: var Tag, h: NodePtr, t: NodePtr): AdvHead =
+  ## Reviewd, seems to follow the algorithm correctly and makes logical sense
+  ## TODO DOC
   var next = h.fetchNext()
   if next.isNil() or (t == h):
     h.incrDeqCount()
     return QueueEmpty
   curr.idx += 1
-  var vcurr = cast[uint](curr)
-  while not queue.compareAndSwapHead(vcurr, (nptr: next, idx: 0'u16)):
+  while not queue.compareAndSwapHead(cast[var uint](addr curr), (nptr: next, idx: 0'u16)):
     if curr.nptr != h:
       h.incrDeqCount()
       return Advanced
