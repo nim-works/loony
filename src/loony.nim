@@ -1,17 +1,8 @@
 # O. Giersch and J. Nolte, "Fast and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation," in IEEE Transactions on Parallel and Distributed Systems, vol. 33, no. 3, pp. 604-616, 1 March 2022, doi: 10.1109/TPDS.2021.3097901.
 
-## REVIEW
-## There is a clear distinction between the order of
-## operations they present in their paper compared to
-## the algorithms on their git repo. Since they link
-## the git-repo in their article it is surely the most
-## correct version right? RIGHT?!
 
 ## TODO
-## Still have to do all the node operations and masking
-## demasking etc. Also there must be some operations missing
-## since I barely touched currTail; I assume ControlBlock is
-## used for the purpose of dereferencing pointers?
+## So much.
 
 import pkg/cps
 import std/atomics
@@ -158,11 +149,14 @@ proc isConsumed(slot: uint): bool =
   discard
   # TODO
 
-proc initNode(): Node =
+proc initNode(): Node =                       ## REVIEW which syntax is better?
   ## This proc MUST be called when initiating new
   ## nodes as we need the appropriate alignment
   ## to store the bit tag index in the pointer
-  ## address
+  ## address  
+  var res {.align(NODEALIGN).} = Node()
+  return res
+proc init[T: Node](t: T): T =                 ## REVIEW which syntax is better?
   var res {.align(NODEALIGN).} = Node()
   return res
 
