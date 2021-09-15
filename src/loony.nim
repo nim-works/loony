@@ -17,24 +17,33 @@ import pkg/cps
 import std/atomics
 
 const
+  ## Slot flag constants
   UNINIT   =   uint8(   0   ) # 0000_0000
   RESUME   =   uint8(1      ) # 0000_0001
   WRITER   =   uint8(1 shl 1) # 0000_0010
   READER   =   uint8(1 shl 2) # 0000_0100
-  CONSUMED = READER or WRITER # 0000_0110
+  CONSUMED =  READER or WRITER# 0000_0110
+  
   SLOT     =   uint8(1      ) # 0000_0001
   DEQ      =   uint8(1 shl 1) # 0000_0010
   ENQ      =   uint8(1 shl 2) # 0000_0100
-  N      = 1024             # Number of slots per node in the queue
+  #
+  N        =         1024     # Number of slots per node in the queue
+  #
+  TAGBITS   =          11     # Each node must be aligned to this value
+  NODEALIGN =  1 shl TAGBITS  # in order to store the required number of
+                              # tag bits in every node pointer
 
   PTR_MASK =   uint8(0      ) # TODO define
+
 
 type
 
   Node = object
+    ## REVIEW - pretty sure ordering of fields matters.
     slots : array[0..N, Atomic[uint]]    # Pointers to object
-    next  : Atomic[uint]                 # NodePtr
-    ctrl  : ControlBlock                 # 
+    next  : Atomic[uint]                 # NodePtr - successor node
+    ctrl  : ControlBlock                 # Control block for mem recl
   NodePtr = ptr Node
 
   Tag = tuple
@@ -48,16 +57,26 @@ type
     tail     : Atomic[uint]     # 8 bytes Pointer to a Tag = (NodePtr, idx)    ## is the uint16 index of the slot array
     currTail : Atomic[uint]     # 8 bytes Current NodePtr
   
+  ## Control block for memory reclamation
   ControlBlock = object
+    ## high uint16 final observed count of slow-path enqueue ops
+    ## low uint16: current count
     headMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    ## high uint16, final observed count of slow-path dequeue ops,
+    ## low uint16: current count
     tailMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    ## Bitmask for storing current reclamation status
+    ## All 3 bits set = node can be reclaimed
     reclaim  : Atomic[     uint8      ]     #                   1 byte
+
 const
-  #CONTROLBLOCK MANIP
+  # Ref-count constants
   SHIFT = 16      # Shift to access 'high' 16 bits of uint32
   MASK  = 0xFFFF  # Mask to access 'low' 16 bits of uint32
 
 type
+  ## Result types for the private
+  ## advHead and advTail functions
   AdvTail = enum
     AdvAndInserted, # 0000_0000
     AdvOnly         # 0000_0001
@@ -135,6 +154,17 @@ template incIdx(tag: Tag) =
   tag[1].inc()
 
 
+proc isConsumed(slot: uint): bool =
+  discard
+  # TODO
+
+proc initNode(): Node =
+  ## This proc MUST be called when initiating new
+  ## nodes as we need the appropriate alignment
+  ## to store the bit tag index in the pointer
+  ## address
+  var res {.align(NODEALIGN).} = Node()
+  return res
 
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
   ## Reviewd, seems to follow the algorithm correctly and makes logical sense
@@ -238,3 +268,22 @@ proc deque(queue: var LoonyQueue): Continuation =
 
 proc isEmpty(queue: var LoonyQueue): bool =
   discard # TODO
+
+## Consumed slots have been written to and then read
+## If a concurrent deque operation outpaces the
+## corresponding enqueue operation then both operations
+## have to abandon and try again. Once all slots in the
+## node have been consumed or abandoned, the node is
+## considered drained and unlinked from the list.
+## Node can be reclaimed and de-allocated.
+
+## Queue manages an enqueue index and a dequeue index.
+## Each are modified by fetchAndAdd; gives thread reserves
+## previous index for itself which may be used to address
+## a slot in the respective nodes array.
+## ANCHOR both node pointers are tagged with their assoc
+## index value -> they store both address to respective
+## node as well as the current index value in the same
+## memory word.
+## Requires a sufficient number of available bits that
+## are not used to present the nodes addresses themselves.
