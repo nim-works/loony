@@ -45,20 +45,23 @@ type
     QueueEmpty,     # 0000
     Advanced        # 0001
 
-template fetchIncTailTag(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.tail.fetchAdd(1))[]
-template fetchIncHeadTag(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.head.fetchAdd(1))[]
-template fetchAddSlot(t: NodePtr, idx: uint16, w: uint): uint =
-  t[].slots[idx].fetchAdd(w)
 template prepareElement(el: Continuation): uint =
   (cast[uint](el) or WRITER)  # BIT or
+
 template fetchTail(queue: var LoonyQueue): Tag =
   cast[ptr Tag](queue.tail.load())[]
 template fetchHead(queue: var LoonyQueue): Tag =
   cast[ptr Tag](queue.head.load())[]
+template fetchIncTail(queue: var LoonyQueue): Tag =
+  cast[ptr Tag](queue.tail.fetchAdd(1))[]
+template fetchIncHead(queue: var LoonyQueue): Tag =
+  cast[ptr Tag](queue.head.fetchAdd(1))[]
+
 template fetchNext(node: NodePtr): NodePtr =
   cast[NodePtr](node[].next.load())
+template fetchAddSlot(t: NodePtr, idx: uint16, w: uint): uint =
+  t[].slots[idx].fetchAdd(w)
+
 template compareAndSwapNext(t: NodePtr, expect: var uint, swap: var uint): bool =
   t[].next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint): bool =
@@ -76,13 +79,12 @@ template incrDeqCount(t: NodePtr, v: uint = 0'u) =
   discard # TODO
 
 proc tryReclaim(idx: uint): Node =
-  #TODO
-  discard
+  discard # TODO
 
 template deallocNode(x: untyped): untyped =
-  discard #TODO
+  discard # TODO
 template allocNode(x: untyped): untyped =
-  discard #TODO
+  discard # TODO
 
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
   ## REVIEW
@@ -139,7 +141,7 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
   while true:
     var t: NodePtr
     var i: uint16
-    (t, i) = fetchIncTailTag(queue)
+    (t, i) = fetchIncTail(queue)
     if i < N:  # Fast path - guaranteed exclusive rights to write/consume
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(t, i, w)
@@ -162,7 +164,7 @@ proc deque(queue: var LoonyQueue): Continuation =
     (t, ti) = queue.fetchTail()
     if (i >= N or i >= ti) and (h == t):
       return nil # Um ok
-    (h, i) = queue.fetchIncTailTag()
+    (h, i) = queue.fetchIncTail()
     if i < N:
       var prev = h.fetchAddSlot(i, READER)
       if i == N-1:
