@@ -1,5 +1,18 @@
 # O. Giersch and J. Nolte, "Fast and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation," in IEEE Transactions on Parallel and Distributed Systems, vol. 33, no. 3, pp. 604-616, 1 March 2022, doi: 10.1109/TPDS.2021.3097901.
 
+## REVIEW
+## There is a clear distinction between the order of
+## operations they present in their paper compared to
+## the algorithms on their git repo. Since they link
+## the git-repo in their article it is surely the most
+## correct version right? RIGHT?!
+
+## TODO
+## Still have to do all the node operations and masking
+## demasking etc. Also there must be some operations missing
+## since I barely touched currTail; I assume ControlBlock is
+## used for the purpose of dereferencing pointers?
+
 import pkg/cps
 import std/atomics
 
@@ -52,6 +65,8 @@ template fetchTail(queue: var LoonyQueue): Tag =
   cast[ptr Tag](queue.tail.load())[]
 template fetchHead(queue: var LoonyQueue): Tag =
   cast[ptr Tag](queue.head.load())[]
+template fetchCurrTail(queue: var LoonyQueue): NodePtr =
+  cast[NodePtr](queue.currTail.load())
 template fetchIncTail(queue: var LoonyQueue): Tag =
   cast[ptr Tag](queue.tail.fetchAdd(1))[]
 template fetchIncHead(queue: var LoonyQueue): Tag =
@@ -178,3 +193,6 @@ proc deque(queue: var LoonyQueue): Continuation =
       case queue.advHead(curr, h, t)
       of Advanced: continue
       of QueueEmpty: return nil # big oof
+
+proc isEmpty(queue: var LoonyQueue): bool =
+  discard # TODO
