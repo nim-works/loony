@@ -219,11 +219,9 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
     var i: uint16
     (t, i) = fetchIncTail(queue) ## FIXME this is incorrect arithmetic as I'm increasing the value of the pointer
     ## FIXME I'm also converting a uint into a 10 byte tuple lmao; should be cast
-    ## to a TagPtr and then dereferenced
-
-    ## REVIEW Possible solution -> I store a value up to 7
-    ## in the last 3 bits of the pointer. Can I do something with that?
-    if i < N:  # Fast path - guaranteed exclusive rights to write/consume
+    # TODO - implement fix of my stupidity. I have now the first 12 bits to store the index. Just need to implement
+    # and use a PTR MASK and a TAG MASK proc to get the requested value. This also means fetchIncTail will properly
+    # increment the value of the index.
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(t, i, w)
       if prev <= RESUME:
