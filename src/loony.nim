@@ -193,7 +193,12 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
   while true:
     var t: NodePtr
     var i: uint16
-    (t, i) = fetchIncTail(queue)
+    (t, i) = fetchIncTail(queue) ## FIXME this is incorrect arithmetic as I'm increasing the value of the pointer
+    ## FIXME I'm also converting a uint into a 10 byte tuple lmao; should be cast
+    ## to a TagPtr and then dereferenced
+
+    ## REVIEW Possible solution -> I store a value up to 7
+    ## in the last 3 bits of the pointer. Can I do something with that?
     if i < N:  # Fast path - guaranteed exclusive rights to write/consume
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(t, i, w)
