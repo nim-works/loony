@@ -56,7 +56,7 @@ template fetchHead(queue: var LoonyQueue): TagPtr =
   TagPtr(queue.head.load())
 
 template fetchCurrTail(queue: var LoonyQueue): NodePtr =
-  ## get the NodePtr of the current tail REVIEW why isn't this a TagPtr?
+  ## get the NodePtr of the current tail
   cast[NodePtr](queue.currTail.load())
 
 template fetchIncTail(queue: var LoonyQueue): TagPtr =
@@ -81,12 +81,7 @@ template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint 
 ## This path requires the threads to first help updating the linked list struct
 ## before retrying and entering the fast path in the next attempt.
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
-  ## Modified Michael-Scott algorithm; they literally say "we assume
-  ## the reader is sufficiently familiar and refer to for further insight"
-  ## Dude I know what a gubernaculum is but a Michael-Scott algorithm? What?
-  ## They do actually discuss their modifications but I don't care enough
-  ## since the slow path is rarely entered. CHORE okay fine I'll include some docs
-  ## but I'm tired
+  ## Modified Michael-Scott algorithm
   var null = 0'u
   while true:
     var curr: TagPtr = queue.fetchTail()
@@ -121,8 +116,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
 
 
 proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
-  ## Reviewd, seems to follow the algorithm correctly and makes logical sense
-  ## TODO DOC
+  h.tryReclaim(0'u8)  # As done in cpp impl
   var next = h.fetchNext()
   if cast[ptr Node](next).isNil() or (t == h):
     h.incrDeqCount()
@@ -166,9 +160,9 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
     var tag = fetchIncTail(queue)
     var t: NodePtr = tag.nptr
     var i: uint16 = tag.idx
-    if i < N:
+    if likely(i < N):
       ## We begin by tagging the pointer for el with a WRITER
-      ## bit and then perform a FAA. LINK
+      ## bit and then perform a FAA.
       var w   : uint = prepareElement(el) 
       let prev: uint = fetchAddSlot(t, i, w)
       if prev > 0:
@@ -187,7 +181,6 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
         ## on the same node.
-        ## REVIEW abandon operation (tryReclaim)
         t.tryReclaim(i + 1)
       ## Should the case above occur or we detect already the slot has
       ## been filled by some gypsy magic then we will retry
@@ -227,11 +220,11 @@ proc pop*(queue: var LoonyQueue): Continuation =
       ## On the last slot in a node, we initiate the reclaim
       ## procedure; if the writer bit is set then the upper bits
       ## must contain a valid pointer to an enqueued element
-      ## that can be returned (see enqueue LINK)
+      ## that can be returned (see enqueue)
       if unlikely((prev and SLOTMASK) == 0): continue
-      if i == N-1: ## REVIEW why do we abandon the last index? do we do the same for the push?
-        h.tryReclaim(0'u8)
-        continue
+      # if i == N-1: ## why do we abandon the last index? do we do the same for the push?
+      #   h.tryReclaim(0'u8)
+      #   continue  ## REVIEW - This operation makes no sense to me and it wasn't in the cpp imp so I killed it
       if (prev and constants.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
           h.tryReclaim(i + 1)
