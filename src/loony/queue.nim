@@ -94,7 +94,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
       return AdvOnly
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
-      var node = cast[NodePtr](el) # allocNode(el) TODO; allocate mem
+      var node = allocNode(el)
       null = 0'u
       if t.compareAndSwapNext(null, node):
         null = 0'u
@@ -106,7 +106,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         t.incrEnqCount(curr.idx - N)
         return AdvAndInserted
       else:
-        # deallocNode(node) TODO; dealloc mem
+        deallocNode(node) #TODO; dealloc mem
         continue
     else: # T20
       null = 0'u
@@ -184,7 +184,7 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
         ## on the same node.
-        ## REIVEW abandon operation (tryReclaim)
+        ## REVIEW abandon operation (tryReclaim)
         t.tryReclaim(i + 1)
       ## Should the case above occur or we detect already the slot has
       ## been filled by some gypsy magic then we will retry
@@ -223,17 +223,20 @@ proc pop*(queue: var LoonyQueue): Continuation =
       return nil # Um ok
     var head = queue.fetchIncHead()
     (h, i) = (head.nptr, head.idx)
-    if i < N:
+    if likely(i < N):
       var prev = h.fetchAddSlot(i, READER)
       ## On the last slot in a node, we initiate the reclaim
       ## procedure; if the writer bit is set then the upper bits
       ## must contain a valid pointer to an enqueued element
       ## that can be returned (see enqueue LINK)
+      if unlikely((prev and SLOTMASK) == 0): continue
       if i == N-1:
         h.tryReclaim(0'u8)
       if (prev and WRITER) != 0:
-        if (prev and RESUME) != 0:
+        if unlikely((prev and RESUME) != 0):
           h.tryReclaim(i + 1)
+          ## FIXME sigsegv when arriving to this op
+          ## when i = 133 on my single threaded tests
         return cast[Continuation](prev and SLOTMASK)
       continue
     else:

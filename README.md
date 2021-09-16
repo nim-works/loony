@@ -9,3 +9,10 @@ I originally just wanted a high throughput MPMC queue for [CPS](https://github.c
 - [Algorithms](https://github.com/oliver-giersch/looqueue/blob/master/ALGORITHMS.md)
 
 ---
+
+# HELP
+
+
+Running the test on a single thread (or multiple) throws a SIGSEGV; at a
+consistent index the ENQUEUE skips an index, when the DEQUEUE arrives to
+this index it SIGSEGVs

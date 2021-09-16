@@ -68,7 +68,10 @@ proc tryReclaim*(t: NodePtr, start: uint16) =
     var s = t.toNode().slots[i]
     if (s.load() and CONSUMED) != CONSUMED:
       var prev = s.fetchAdd(RESUME) and CONSUMED
+      echo prev
       if prev != CONSUMED:
+        echo i
+        # FIXME I keep hitting a SIGSEV 
         return
   var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
   if flags == (ENQ or DEQ):
