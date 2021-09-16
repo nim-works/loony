@@ -13,7 +13,7 @@ import pkg/cps
 # raise Defect(nil)
 
 type
-  LoonyQueue* = object
+  LoonyQueue* = object  # Can't I just have the loony queue as a ref?
     head     : Atomic[TagPtr]     # (NodePtr, idx)    ## Whereby node contains the slots and idx
     tail     : Atomic[TagPtr]     # (NodePtr, idx)    ## is the uint16 index of the slot array
     currTail : Atomic[NodePtr]    # 8 bytes Current NodePtr
@@ -87,6 +87,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
   ## since the slow path is rarely entered. CHORE okay fine I'll include some docs
   ## but I'm tired
   var null = 0'u
+  var fincount: uint16
   while true:
     var curr: TagPtr = queue.fetchTail()
     if t != curr.nptr:
@@ -103,7 +104,8 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
           if t != curr.nptr:
             t.incrEnqCount()
             return AdvAndInserted
-        t.incrEnqCount(curr.idx-N)
+        fincount = curr.idx - N
+        t.incrEnqCount(fincount)
         return AdvAndInserted
       else:
         # deallocNode(node) TODO; dealloc mem
@@ -114,7 +116,8 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         if t != curr.nptr:
           t.incrEnqCount()
           return AdvOnly
-      t.incrEnqCount(curr.idx-N)
+      fincount = curr.idx - N
+      t.incrEnqCount(fincount)
       return AdvOnly
 
 
@@ -131,7 +134,8 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
     if curr.nptr != h:
       h.incrDeqCount()
       return Advanced
-  h.incrDeqCount(curr.idx-N)
+  var fincount = curr.idx - N
+  h.incrDeqCount(fincount)
   return Advanced
 
 
@@ -158,7 +162,7 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
 ## to announce both operations completion (in case of a read) and also
 ## makes determining the order in which two operations occured possible.
 
-proc enqueue(queue: var LoonyQueue, el: Continuation) =
+proc enqueue*(queue: var LoonyQueue, el: Continuation) =
   while true:
     ## The enqueue procedure begins with incrementing the
     ## index of the associated node in the TagPtr
@@ -184,8 +188,8 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
         ## on the same node.
-        ## TODO implement abandon operation (tryReclaim)
-        (t.toNode) = tryReclaim(i + 1)
+        ## REIVEW abandon operation (tryReclaim)
+        t.tryReclaim(i + 1)
       ## Should the case above occur or we detect already the slot has
       ## been filled by some gypsy magic then we will retry
       continue
@@ -205,7 +209,7 @@ proc isEmpty*(queue: var LoonyQueue): bool =
     return true
   return false
 
-proc deque(queue: var LoonyQueue): Continuation =
+proc deque*(queue: var LoonyQueue): Continuation =
   while true:
     ## Before incrementing the dequeue index, an initial check must be performed
     ## to determine if the queue is empty. The article contains an algorithm
@@ -230,10 +234,10 @@ proc deque(queue: var LoonyQueue): Continuation =
       ## must contain a valid pointer to an enqueued element
       ## that can be returned (see enqueue LINK)
       if i == N-1:
-        (h.toNode) = tryReclaim(0)
+        h.tryReclaim(0'u8)
       if (prev and WRITER) != 0:
         if (prev and RESUME) != 0:
-          (h.toNode) = tryReclaim(i + 1)
+          h.tryReclaim(i + 1)
         return cast[Continuation](prev and PTR_MASK) # TODO: define PTR_MASK
       continue
     else:
@@ -260,3 +264,14 @@ proc deque(queue: var LoonyQueue): Continuation =
 ## memory word.
 ## Requires a sufficient number of available bits that
 ## are not used to present the nodes addresses themselves.
+
+
+proc initLoonyQueue*(): LoonyQueue = # So I should definitely have a destroy proc to clear the nodes but i do that later
+  result = LoonyQueue()
+  var headTag = allocNode()
+  var tailTag = headTag
+  result.head.store(headTag)
+  result.tail.store(tailTag)
+  result.currTail.store(tailTag)
+  # I mean the enqueue and dequeue pretty well handle any issues with
+  # initialising, but I might as well help allocate the first ones right?

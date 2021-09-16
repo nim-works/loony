@@ -59,7 +59,7 @@ proc initNode*(): Node =
 proc init*[T: Node](t: T): T =
   var res {.align(NODEALIGN).} = Node(); return res
 
-proc tryReclaim*(t: NodePtr, start: uint16): Node =
+proc tryReclaim*(t: NodePtr, start: uint16) =
   for i in start..N:
     var s = t.toNode().slots[i]
     if (s.load() and CONSUMED) != CONSUMED:
