@@ -1,5 +1,5 @@
 import std/atomics
-import "."/[constants, controlblock, alias]
+import "."/[constants, controlblock, alias, memalloc]
 # Import the holy one
 import pkg/cps
 
@@ -8,6 +8,11 @@ type
     slots* : array[0..N, Atomic[uint]]    # Pointers to object
     next*  : Atomic[NodePtr]              # NodePtr - successor node
     ctrl*  : ControlBlock                 # Control block for mem recl
+
+when isMainModule:
+  echo ""
+  var node = alignedAlloc0(sizeof(Node), NODEALIGN)
+  echo cast[uint](node)
 
 template toNodePtr*(pt: uint | ptr Node): NodePtr =  # Convert ptr Node into NodePtr uint
   cast[NodePtr](pt)
@@ -18,8 +23,10 @@ template toUInt*(node: var Node): uint =             # Get address to node
 template toUInt*(nodeptr: ptr Node): uint =          # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-template prepareElement*(el: Continuation): uint =
-  (cast[uint](el) or WRITER)  # BIT or
+proc prepareElement*(el: Continuation): uint =
+  GC_ref(el)
+  return (cast[uint](el) or WRITER)  # BIT or
+  # (cast[uint](el))  # BIT or
 
 template fetchNext*(node: Node): NodePtr = node.next.load()
 template fetchNext*(node: NodePtr): NodePtr =
@@ -40,28 +47,28 @@ template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool
   (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 
 template deallocNode*(n: var Node) =
-  freeShared(n.addr)
+  deallocAligned(n.addr, NODEALIGN.int)
+  
 template deallocNode*(n: NodePtr) =
-  freeShared(cast[ptr Node](n))
+  deallocAligned(cast[pointer](n), NODEALIGN.int)
+
 
 proc allocNode*(): NodePtr =     # Is this for some reason better if template?
-  # var res {.align(NODEALIGN).} = createShared(Node)
-  var res {.align(NODEALIGN).}: Node = Node() # FIXME this is concerning to me; I couldn't allocate shared memory that is aligned correctly; is this threadsafe?
-  # return res.toNodePtr
-  return res.addr().toNodePtr()
-proc allocNode*(el: Continuation): NodePtr =
-  ## Allocate a fresh node with the first slot assigned
-  ## to element el with the writer slot set
-  # var res {.align(NODEALIGN).} = createShared(Node)
-  var res {.align(NODEALIGN).} = Node()
-  res.slots[0].store(el.prepareElement())
-  # return res.toNodePtr
-  return res.addr().toNodePtr()
+  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
+  res[] = Node()
+  result = res.toNodePtr()
 
-proc initNode*(): Node =
-  var res {.align(NODEALIGN).} = Node(); return res # Should I still use mem alloc createShared?
-proc init*[T: Node](t: T): T =
-  var res {.align(NODEALIGN).} = Node(); return res
+proc allocNode*(el: Continuation): NodePtr =
+  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
+  res[] = Node()
+  res[].slots[0].store(el.prepareElement())
+  # return res.toNodePtr
+  return res.toNodePtr()
+
+# proc initNode*(): Node =
+#   var res {.align(NODEALIGN).} = Node(); return res # Should I still use mem alloc createShared?
+# proc init*[T: Node](t: T): T =
+#   var res {.align(NODEALIGN).} = Node(); return res
 
 proc tryReclaim*(t: NodePtr, start: uint16) =
   for i in start..N:

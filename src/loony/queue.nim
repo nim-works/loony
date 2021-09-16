@@ -2,6 +2,7 @@ import std/atomics
 import "."/[alias, constants, controlblock, node]
 # Import the holy one
 import pkg/cps
+import chronicles
 
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
@@ -60,11 +61,11 @@ template fetchCurrTail(queue: var LoonyQueue): NodePtr =
 
 template fetchIncTail(queue: var LoonyQueue): TagPtr =
   ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
-  TagPtr(queue.tail.fetchAdd(1))
+  cast[TagPtr](queue.tail.fetchAdd(1))
 
 template fetchIncHead(queue: var LoonyQueue): TagPtr =
   ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
-  TagPtr(queue.head.fetchAdd(1))
+  cast[TagPtr](queue.head.fetchAdd(1))
 
 template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
@@ -106,7 +107,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         t.incrEnqCount(curr.idx - N)
         return AdvAndInserted
       else:
-        deallocNode(node) #TODO; dealloc mem
+        deallocNode(node)
         continue
     else: # T20
       null = 0'u
@@ -170,6 +171,8 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
       ## bit and then perform a FAA. LINK
       var w   : uint = prepareElement(el) 
       let prev: uint = fetchAddSlot(t, i, w)
+      if prev > 0:
+        warn "FAST PATH PUSH encountered pre-filled slot", prefilled = prev, index = i, new_val = w
       ## Since we are assured that the slots would be 0'd, the
       ## slots value should be evaluated to be less than 0 (RESUME
       ## = 1).
@@ -208,11 +211,7 @@ proc isEmpty*(queue: var LoonyQueue): bool =
 proc pop*(queue: var LoonyQueue): Continuation =
   while true:
     ## Before incrementing the dequeue index, an initial check must be performed
-    ## to determine if the queue is empty. The article contains an algorithm
-    ## for the dequeue that is different to the one in their repo. I believe they
-    ## have pushed some operations to be handled by the slow path in cases where
-    ## it is required on edge cases so the fast path proceeds unfettered. will
-    ## need this to be REVIEWd
+    ## to determine if the queue is empty.
     var curr = queue.fetchHead()
     var tail = queue.fetchTail()
     var h,t: NodePtr
@@ -232,12 +231,13 @@ proc pop*(queue: var LoonyQueue): Continuation =
       if unlikely((prev and SLOTMASK) == 0): continue
       if i == N-1:
         h.tryReclaim(0'u8)
-      if (prev and WRITER) != 0:
+      if (prev and constants.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
+          echo i
           h.tryReclaim(i + 1)
-          ## FIXME sigsegv when arriving to this op
-          ## when i = 133 on my single threaded tests
-        return cast[Continuation](prev and SLOTMASK)
+        var res = cast[Continuation](prev and SLOTMASK)
+        GC_unref(res)
+        return res
       continue
     else:
       case queue.advHead(curr, h, t)
@@ -272,5 +272,10 @@ proc initLoonyQueue*(): LoonyQueue = # So I should definitely have a destroy pro
   result.head.store(headTag)
   result.tail.store(tailTag)
   result.currTail.store(tailTag)
+  for i in 0..N:
+    var h = headTag.toNode().slots[i].load()
+    var t = tailTag.toNode().slots[i].load()
+    assert h == 0, "Slot found to not be nil on initialisation"
+    assert t == 0, "Slot found to not be nil on initialisation"
   # I mean the enqueue and dequeue pretty well handle any issues with
   # initialising, but I might as well help allocate the first ones right?
