@@ -1,9 +1,5 @@
 # O. Giersch and J. Nolte, "Fast and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation," in IEEE Transactions on Parallel and Distributed Systems, vol. 33, no. 3, pp. 604-616, 1 March 2022, doi: 10.1109/TPDS.2021.3097901.
 
-
-## TODO
-## So much.
-
 import pkg/cps
 import std/atomics
 
@@ -21,44 +17,39 @@ const
   #
   N        =         1024     # Number of slots per node in the queue
   #
-  TAGBITS   =          11     # Each node must be aligned to this value
-  NODEALIGN =  1 shl TAGBITS  # in order to store the required number of
-                              # tag bits in every node pointer
-
-  PTR_MASK =   uint8(0      ) # TODO define
+  TAGBITS   : uint = 11               # Each node must be aligned to this value
+  NODEALIGN : uint = 1 shl TAGBITS    # in order to store the required number of
+  TAGMASK   : uint = NODEALIGN - 1    # tag bits in every node pointer
+  PTRMASK   : uint = high(uint) xor TAGMASK
 
 
 type
+  NodePtr = uint
+  TagPtr = uint   # Aligned pointer with 12 bit prefix containing the tag. Access using procs nptr and idx
+  ControlMask = uint32
 
   Node = object
     ## REVIEW - pretty sure ordering of fields matters.
     slots : array[0..N, Atomic[uint]]    # Pointers to object
-    next  : Atomic[uint]                 # NodePtr - successor node
+    next  : Atomic[NodePtr]                 # NodePtr - successor node
     ctrl  : ControlBlock                 # Control block for mem recl
-  NodePtr = ptr Node
-
-  Tag = tuple
-    nptr: NodePtr     # 8 bytes
-    idx: uint16       # 2 bytes
-  TagPtr = ptr Tag
-  # Tag = (Node, uint16)
 
   LoonyQueue = object
-    head     : Atomic[uint]     # 8 bytes Pointer to a Tag = (NodePtr, idx)    ## Whereby node contains the slots and idx
-    tail     : Atomic[uint]     # 8 bytes Pointer to a Tag = (NodePtr, idx)    ## is the uint16 index of the slot array
-    currTail : Atomic[uint]     # 8 bytes Current NodePtr
+    head     : Atomic[TagPtr]     # (NodePtr, idx)    ## Whereby node contains the slots and idx
+    tail     : Atomic[TagPtr]     # (NodePtr, idx)    ## is the uint16 index of the slot array
+    currTail : Atomic[NodePtr]    # 8 bytes Current NodePtr
   
   ## Control block for memory reclamation
   ControlBlock = object
     ## high uint16 final observed count of slow-path enqueue ops
     ## low uint16: current count
-    headMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    headMask : Atomic[ControlMask]     # (uint16, uint16)  4 bytes
     ## high uint16, final observed count of slow-path dequeue ops,
     ## low uint16: current count
-    tailMask : Atomic[     uint32     ]     # (uint16, uint16)  4 bytes
+    tailMask : Atomic[ControlMask]     # (uint16, uint16)  4 bytes
     ## Bitmask for storing current reclamation status
     ## All 3 bits set = node can be reclaimed
-    reclaim  : Atomic[     uint8      ]     #                   1 byte
+    reclaim  : Atomic[ uint8]     #                   1 byte
 
 const
   # Ref-count constants
@@ -75,35 +66,45 @@ type
     QueueEmpty,     # 0000_0000
     Advanced        # 0000_0001
 
+template toNodePtr(pt: uint | ptr Node): NodePtr =
+  cast[NodePtr](pt)
+template toNode(pt: NodePtr | uint): Node =
+  cast[ptr Node](pt)[]
+template toUInt(node: Node): uint =
+  cast[uint](node.addr)
+template toUInt(nodeptr: ptr Node): uint =
+  cast[uint](nodeptr)
+
+
 template prepareElement(el: Continuation): uint =
   (cast[uint](el) or WRITER)  # BIT or
 
-template fetchTail(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.tail.load())[]
-template fetchHead(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.head.load())[]
+template fetchTail(queue: var LoonyQueue): TagPtr =
+  TagPtr(queue.tail.load())
+template fetchHead(queue: var LoonyQueue): TagPtr =
+  TagPtr(queue.head.load())
 template fetchCurrTail(queue: var LoonyQueue): NodePtr =
   cast[NodePtr](queue.currTail.load())
-template fetchIncTail(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.tail.fetchAdd(1))[]
-template fetchIncHead(queue: var LoonyQueue): Tag =
-  cast[ptr Tag](queue.head.fetchAdd(1))[]
+template fetchIncTail(queue: var LoonyQueue): TagPtr =
+  TagPtr(queue.tail.fetchAdd(1))
+template fetchIncHead(queue: var LoonyQueue): TagPtr =
+  TagPtr(queue.head.fetchAdd(1))
 
 template fetchNext(node: NodePtr): NodePtr =
-  cast[NodePtr](node[].next.load())
+  (node.toNode).next.load()
 template fetchAddSlot(t: NodePtr, idx: uint16, w: uint): uint =
-  t[].slots[idx].fetchAdd(w)
+  (t.toNode).slots[idx].fetchAdd(w)
 
 template compareAndSwapNext(t: NodePtr, expect: var uint, swap: var uint): bool =
-  t[].next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
+  (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint): bool =
   queue.tail.compareExchange(expect, swap)
-template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: Tag): bool =
-  queue.tail.compareExchange(expect, cast[uint](swap))
+template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: TagPtr): bool =
+  queue.tail.compareExchange(expect, swap)
 template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint): bool =
   queue.head.compareExchange(expect, swap)
-template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: Tag): bool =
-  queue.head.compareExchange(expect, cast[uint](swap))
+template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: TagPtr): bool =
+  queue.head.compareExchange(expect, swap)
 
 
 template incrEnqCount(t: NodePtr, v: uint = 0'u) =
@@ -119,64 +120,64 @@ proc tryReclaim(idx: uint): Node =
 template deallocNode(x: untyped): untyped =
   discard # TODO
 template allocNode(x: untyped): untyped =
-  discard # TODO
+  var res {.align(NODEALIGN).} = createShared(Node)
 
 
 
-template toNodePtr(pt: uint): NodePtr =
-  cast[NodePtr](pt)
-template toNode(pt: uint): Node =
-  cast[NodePtr](pt)[]
-template toTagPtr(pt: uint): TagPtr =
-  cast[TagPtr](pt)
-template toTag(pt: uint): Tag =
-  cast[TagPtr](pt)[]
-template toUInt(tag: var Tag): uint =
-  cast[uint](tag.addr)
-template toUInt(tagptr: TagPtr | ptr Tag): uint =
-  cast[uint](tagptr)
-template toUInt(node: var Node): uint =
-  cast[uint](node.addr)
-template toUInt(nodeptr: NodePtr | ptr Node): uint =
-  cast[uint](nodeptr)
-template incIdx(tptr: TagPtr) =
-  tptr[][1].inc()
-template incIdx(tag: Tag) =
-  tag[1].inc()
+proc nptr(tag: TagPtr): NodePtr =
+  result = toNodePtr(tag and PTRMASK)
+proc idx(tag: TagPtr): uint16 =
+  result = uint16(tag and TAGMASK)
+proc tag(tag: TagPtr): uint16 = tag.idx
+proc `$`(tag: TagPtr): string =
+  var res = (nptr:tag.nptr, idx:tag.idx)
+  return $res
 
+proc getHigh(mask: ControlMask): uint16 =
+  return cast[uint16](mask shr SHIFT)
+proc getLow(mask: ControlMask): uint16 =
+  return cast[uint16](mask)
+
+proc fetchAddHigh(mask: var Atomic[ControlMask]): uint16 =
+  return cast[uint16]((mask.fetchAdd(1 shl SHIFT)) shr SHIFT)
+proc fetchAddLow(mask: var Atomic[ControlMask]): uint16 =
+  return cast[uint16](mask.fetchAdd(1))
+proc fetchAddMask(mask: var Atomic[ControlMask], pos: int, val: uint32): ControlMask =
+  if pos > 0:
+    return mask.fetchAdd(val shl SHIFT)
+  return mask.fetchAdd(val)
 
 proc isConsumed(slot: uint): bool =
   discard
   # TODO
 
-proc initNode(): Node =                       ## REVIEW which syntax is better?
+proc initNode(): NodePtr =                       ## REVIEW which syntax is better?
   ## This proc MUST be called when initiating new
   ## nodes as we need the appropriate alignment
   ## to store the bit tag index in the pointer
   ## address  
-  var res {.align(NODEALIGN).} = Node()
-  return res
-proc init[T: Node](t: T): T =                 ## REVIEW which syntax is better?
-  var res {.align(NODEALIGN).} = Node()
-  return res
+  var res {.align(NODEALIGN).} = createShared(Node)
+  return res.toNodePtr
+proc init[T: NodePtr](t: T): T =                 ## REVIEW which syntax is better?
+  var res {.align(NODEALIGN).} = createShared(Node)
+  return res.toNodePtr
 
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
   ## Reviewd, seems to follow the algorithm correctly and makes logical sense
   ## TODO DOC
   var null = 0'u
   while true:
-    var curr: Tag = queue.fetchTail()
+    var curr: TagPtr = queue.fetchTail()
     if t != curr.nptr:
       t.incrEnqCount()
       return AdvOnly
     var next = t.fetchNext()
-    if next.isNil():
-      var node = cast[NodePtr](el).toUInt() # allocNode(el) TODO; allocate mem
+    if cast[ptr Node](next).isNil():
+      var node = cast[NodePtr](el) # allocNode(el) TODO; allocate mem
       null = 0'u
       if t.compareAndSwapNext(null, node):
         null = 0'u
-        var tag: Tag = (nptr: cast[NodePtr](node), idx: 1'u16)
-                  # I don't understand why I'm doing this :/, like I think I do but not really.
+        var tag: TagPtr = node + 1  # Translates to (nptr: node, idx: 1)
         while not queue.compareAndSwapTail(null, tag): # T11
           if t != curr.nptr:
             t.incrEnqCount()
@@ -188,22 +189,22 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         continue
     else: # T20
       null = 0'u
-      while not queue.compareAndSwapTail(null,(nptr:next, idx:1'u16)):
+      while not queue.compareAndSwapTail(null,next+1):    # next+1 translates to (nptr: next, idx: 1)
         if t != curr.nptr:
           t.incrEnqCount()
           return AdvOnly
       t.incrEnqCount(curr.idx-N)
       return AdvOnly
 
-proc advHead(queue: var LoonyQueue, curr: var Tag, h: NodePtr, t: NodePtr): AdvHead =
+proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
   ## Reviewd, seems to follow the algorithm correctly and makes logical sense
   ## TODO DOC
   var next = h.fetchNext()
-  if next.isNil() or (t == h):
+  if cast[ptr Node](next).isNil() or (t == h):
     h.incrDeqCount()
     return QueueEmpty
-  curr.idx += 1
-  while not queue.compareAndSwapHead(cast[var uint](addr curr), (nptr: next, idx: 0'u16)):
+  curr += 1 # Equivalent to (nptr: NodePtr, idx: idx+=1)
+  while not queue.compareAndSwapHead(curr, next.nptr): # equivalent to (nptr: next, idx: 0)
     if curr.nptr != h:
       h.incrDeqCount()
       return Advanced
@@ -213,21 +214,17 @@ proc advHead(queue: var LoonyQueue, curr: var Tag, h: NodePtr, t: NodePtr): AdvH
 
 
 proc enqueue(queue: var LoonyQueue, el: Continuation) =
-  ## REVIEW
   while true:
-    var t: NodePtr
-    var i: uint16
-    (t, i) = fetchIncTail(queue) ## FIXME this is incorrect arithmetic as I'm increasing the value of the pointer
-    ## FIXME I'm also converting a uint into a 10 byte tuple lmao; should be cast
-    # TODO - implement fix of my stupidity. I have now the first 12 bits to store the index. Just need to implement
-    # and use a PTR MASK and a TAG MASK proc to get the requested value. This also means fetchIncTail will properly
-    # increment the value of the index.
+    var tag = fetchIncTail(queue)
+    var t: NodePtr = tag.nptr
+    var i: uint16 = tag.idx
+    if i < N:
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(t, i, w)
       if prev <= RESUME:
         return
       if prev == (READER or RESUME):
-        t[] = tryReclaim(i + 1)
+        (t.toNode) = tryReclaim(i + 1)
       continue
     else:     # Slow path; modified version of Michael-Scott algorithm
       case queue.advTail(el, t)
@@ -237,20 +234,22 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
 proc deque(queue: var LoonyQueue): Continuation =
   while true:
     var curr = queue.fetchHead()
+    var tail = queue.fetchTail()
     var h,t: NodePtr
     var i,ti: uint16
-    (h, i) = curr
-    (t, ti) = queue.fetchTail()
+    (h, i) = (curr.nptr, curr.idx)
+    (t, ti) = (tail.nptr, tail.idx)
     if (i >= N or i >= ti) and (h == t):
       return nil # Um ok
-    (h, i) = queue.fetchIncTail()
+    var ntail = queue.fetchIncTail()
+    (h, i) = (ntail.nptr, ntail.idx)
     if i < N:
       var prev = h.fetchAddSlot(i, READER)
       if i == N-1:
-        h[] = tryReclaim(0)
+        (h.toNode) = tryReclaim(0)
       if (prev and WRITER) != 0:
         if (prev and RESUME) != 0:
-          h[] = tryReclaim(i + 1)
+          (h.toNode) = tryReclaim(i + 1)
         return cast[Continuation](prev and PTR_MASK) # TODO: define PTR_MASK
       continue
     else:
