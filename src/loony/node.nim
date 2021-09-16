@@ -39,14 +39,6 @@ template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
   (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 
-template incrEnqCount*(t: NodePtr, v: uint = 0'u) =
-  discard # TODO
-template incrDeqCount*(t: NodePtr, v: uint = 0'u) =
-  discard # TODO
-
-proc tryReclaim*(idx: uint): Node =
-  discard # TODO
-
 template deallocNode*(n: var Node) =
   freeShared(n.addr)
 template deallocNode*(n: NodePtr) =
@@ -67,6 +59,41 @@ proc initNode*(): Node =
 proc init*[T: Node](t: T): T =
   var res {.align(NODEALIGN).} = Node(); return res
 
-proc isConsumed*(slot: uint): bool =
-  discard
-  # TODO
+proc tryReclaim*(t: NodePtr, start: uint16): Node =
+  for i in start..N:
+    var s = t.toNode().slots[i]
+    if (s.load() and CONSUMED) != CONSUMED:
+      var prev = s.fetchAdd(RESUME) and CONSUMED
+      if prev != CONSUMED:
+        return
+  var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
+  if flags == (ENQ or DEQ):
+    deallocNode(t)
+
+proc incrEnqCount*(t: NodePtr, finalCount: var uint16 = 0) =
+  var mask: ControlMask
+  if finalCount == 0:
+    mask = t.toNode().ctrl.fetchAddTail(1)
+    finalCount = mask.getHigh()
+  else:
+    var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
+    mask = t.toNode().ctrl.fetchAddTail(v)
+  var currCount = mask.getLow() + 1
+  if currCount == finalCount:
+    var prev = t.toNode().ctrl.fetchAddReclaim(ENQ)
+    if prev == (DEQ or SLOT):
+      deallocNode(t)
+
+proc incrDeqCount*(t: NodePtr, finalCount: var uint16 = 0) =
+  var mask: ControlMask
+  if finalCount == 0:
+    mask = t.toNode().ctrl.fetchAddHead(1)
+    finalCount = mask.getHigh()
+  else:
+    var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
+    mask = t.toNode().ctrl.fetchAddHead(v)
+  var currCount = mask.getLow() + 1
+  if currCount == finalCount:
+    var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)   # The article ommits the deq
+    if prev == (ENQ or SLOT):                         # algorithm but I'm guessing i
+      deallocNode(t)                                  # swap these vals to DEQ and ENQ

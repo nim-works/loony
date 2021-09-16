@@ -4,10 +4,12 @@ import "."/[alias, constants, controlblock, node]
 import pkg/cps
 
 # sprinkle some raise defect
-# raise Defect(nil)
-# raise Defect(nil)
-# raise Defect(nil)
-# raise Defect(nil)
+# raise Defect(nil) | yes i am the
+# raise Defect(nil) | salt bae of defects
+# raise Defect(nil) | 
+# raise Defect(nil) | I am defect bae 
+# raise Defect(nil) |
+# and one more for haxscrampers pleasure
 # raise Defect(nil)
 
 type
@@ -82,7 +84,8 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
   ## the reader is sufficiently familiar and refer to for further insight"
   ## Dude I know what a gubernaculum is but a Michael-Scott algorithm? What?
   ## They do actually discuss their modifications but I don't care enough
-  ## since the slow path is rarely entered.
+  ## since the slow path is rarely entered. CHORE okay fine I'll include some docs
+  ## but I'm tired
   var null = 0'u
   while true:
     var curr: TagPtr = queue.fetchTail()
@@ -164,8 +167,8 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
     var i: uint16 = tag.idx
     if i < N:
       ## We begin by tagging the pointer for el with a WRITER
-      ## bit and then perform a FAA.
-      var w   : uint = prepareElement(el)
+      ## bit and then perform a FAA. LINK
+      var w   : uint = prepareElement(el) 
       let prev: uint = fetchAddSlot(t, i, w)
       ## Since we are assured that the slots would be 0'd, the
       ## slots value should be evaluated to be less than 0 (RESUME
@@ -183,14 +186,33 @@ proc enqueue(queue: var LoonyQueue, el: Continuation) =
         ## on the same node.
         ## TODO implement abandon operation (tryReclaim)
         (t.toNode) = tryReclaim(i + 1)
+      ## Should the case above occur or we detect already the slot has
+      ## been filled by some gypsy magic then we will retry
       continue
     else: # Slow path; modified version of Michael-Scott algorithm; see advTail above
       case queue.advTail(el, t)
       of AdvAndInserted: return
       of AdvOnly: continue
 
+proc isEmpty*(queue: var LoonyQueue): bool =
+  var curr = queue.fetchHead()
+  var tail = queue.fetchTail()
+  var h,t: NodePtr
+  var i,ti: uint16
+  (h, i) = (curr.nptr, curr.idx)
+  (t, ti) = (tail.nptr, tail.idx)
+  if (i >= N or i >= ti) and (h == t):
+    return true
+  return false
+
 proc deque(queue: var LoonyQueue): Continuation =
   while true:
+    ## Before incrementing the dequeue index, an initial check must be performed
+    ## to determine if the queue is empty. The article contains an algorithm
+    ## for the dequeue that is different to the one in their repo. I believe they
+    ## have pushed some operations to be handled by the slow path in cases where
+    ## it is required on edge cases so the fast path proceeds unfettered. will
+    ## need this to be REVIEWd
     var curr = queue.fetchHead()
     var tail = queue.fetchTail()
     var h,t: NodePtr
@@ -203,6 +225,10 @@ proc deque(queue: var LoonyQueue): Continuation =
     (h, i) = (ntail.nptr, ntail.idx)
     if i < N:
       var prev = h.fetchAddSlot(i, READER)
+      ## On the last slot in a node, we initiate the reclaim
+      ## procedure; if the writer bit is set then the upper bits
+      ## must contain a valid pointer to an enqueued element
+      ## that can be returned (see enqueue LINK)
       if i == N-1:
         (h.toNode) = tryReclaim(0)
       if (prev and WRITER) != 0:
@@ -215,8 +241,6 @@ proc deque(queue: var LoonyQueue): Continuation =
       of Advanced: continue
       of QueueEmpty: return nil # big oof
 
-proc isEmpty(queue: var LoonyQueue): bool =
-  discard # TODO
 
 ## Consumed slots have been written to and then read
 ## If a concurrent deque operation outpaces the

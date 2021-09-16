@@ -27,3 +27,11 @@ proc fetchAddMask*(mask: var Atomic[ControlMask], pos: int, val: uint32): Contro
   if pos > 0:
     return mask.fetchAdd(val shl SHIFT)
   return mask.fetchAdd(val)
+
+proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1): ControlMask =
+  return ctrl.tailMask.fetchAdd(v)
+proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1): ControlMask =
+  return ctrl.headMask.fetchAdd(v)
+
+proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1): uint8 =
+  return ctrl.reclaim.fetchAdd(v)
