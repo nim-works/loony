@@ -9,5 +9,3 @@ I originally just wanted a high throughput MPMC queue for [CPS](https://github.c
 - [Algorithms](https://github.com/oliver-giersch/looqueue/blob/master/ALGORITHMS.md)
 
 ---
-
-I've got the base of the Fast/Slow path Head and Tail operations done. Need to do the memory management and the pointer masks.

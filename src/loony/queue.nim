@@ -25,6 +25,25 @@ type
     QueueEmpty,     # 0000_0000
     Advanced        # 0000_0001
 
+## TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of the
+## tail to contain the index of the slot to its corresponding node by aligning
+## the node pointers on allocation. Since the index value is stored in the
+## same memory word as its associated node pointer, the FAA operations could
+## potentially affect both values if too many increments were to occur.
+## This is accounted for in the algorithm and with space for overflow in the
+## alignment.
+## See Section 5.2 for the paper to see why an overflow would prove impossible
+## except under extraordinarily large number of thread contention.
+
+proc nptr(tag: TagPtr): NodePtr =
+  result = toNodePtr(tag and PTRMASK)
+proc idx(tag: TagPtr): uint16 =
+  result = uint16(tag and TAGMASK)
+proc tag(tag: TagPtr): uint16 = tag.idx
+proc `$`(tag: TagPtr): string =
+  var res = (nptr:tag.nptr, idx:tag.idx)
+  return $res
+
 template fetchTail(queue: var LoonyQueue): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
   TagPtr(queue.tail.load())
@@ -51,16 +70,19 @@ template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint 
 template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-proc nptr(tag: TagPtr): NodePtr =
-  result = toNodePtr(tag and PTRMASK)
-proc idx(tag: TagPtr): uint16 =
-  result = uint16(tag and TAGMASK)
-proc tag(tag: TagPtr): uint16 = tag.idx
-proc `$`(tag: TagPtr): string =
-  var res = (nptr:tag.nptr, idx:tag.idx)
-  return $res
 
+
+## Both enqueue and dequeue enter FAST PATH operations 99% of the time, however
+## in cases we enter the SLOW PATH operations represented in both enq and deq by
+## advTail and advHead respectively.
+## This path requires the threads to first help updating the linked list struct
+## before retrying and entering the fast path in the next attempt.
 proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =  
+  ## Modified Michael-Scott algorithm; they literally say "we assume
+  ## the reader is sufficiently familiar and refer to for further insight"
+  ## Dude I know what a gubernaculum is but a Michael-Scott algorithm? What?
+  ## They do actually discuss their modifications but I don't care enough
+  ## since the slow path is rarely entered.
   var null = 0'u
   while true:
     var curr: TagPtr = queue.fetchTail()
@@ -92,6 +114,8 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
       t.incrEnqCount(curr.idx-N)
       return AdvOnly
 
+
+
 proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
   ## Reviewd, seems to follow the algorithm correctly and makes logical sense
   ## TODO DOC
@@ -108,21 +132,59 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
   return Advanced
 
 
+## Fundamentally, both enqueue and dequeue operations attempt to
+## exclusively reserve access to a slot in the array of their
+## associated queue node by automatically incremementing the
+## appropriate index value and retrieving the previous value
+## of the index as well as the current node pointer.
+## Threads that retrieve an index i < N (length of the slots array)
+## gain *exclusive* rights to perform either write/consume operation
+## on the corresponding slot.
+## This guarantees there can only be exactly one of each for any
+## given slot.
+## Where i < N, we use FAST PATH operations. These operations are
+## designed to be as fast as possible while only dealing with memory
+## contention in rare edge cases.
+## 
+## if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead above.
+## Fetch And Add (FAA) primitives are used for both incrementing index
+## values as well as performing read(consume) and write operations
+## on reserved slots which drastically improves scalability compared to
+## Compare And Swap (CAS) primitives.
+## Note that all operations on slots must modify the slots state bits
+## to announce both operations completion (in case of a read) and also
+## makes determining the order in which two operations occured possible.
 
 proc enqueue(queue: var LoonyQueue, el: Continuation) =
   while true:
+    ## The enqueue procedure begins with incrementing the
+    ## index of the associated node in the TagPtr
     var tag = fetchIncTail(queue)
     var t: NodePtr = tag.nptr
     var i: uint16 = tag.idx
     if i < N:
+      ## We begin by tagging the pointer for el with a WRITER
+      ## bit and then perform a FAA.
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(t, i, w)
+      ## Since we are assured that the slots would be 0'd, the
+      ## slots value should be evaluated to be less than 0 (RESUME
+      ## = 1).
       if prev <= RESUME:
         return
+      ## If however we assess that the READER bit was already set before
+      ## we arrived, then the corresponding dequeue operation arrived
+      ## too early and we must consequently abandon the slot and retry
       if prev == (READER or RESUME):
+        ## Checking for the presence of the RESUME bit only pertains to
+        ## the memory reclamation mechanism and is only relevant
+        ## in rare edge cases in which the enqueue operation
+        ## is significantly delayed and lags behind most other operations
+        ## on the same node.
+        ## TODO implement abandon operation (tryReclaim)
         (t.toNode) = tryReclaim(i + 1)
       continue
-    else:     # Slow path; modified version of Michael-Scott algorithm
+    else: # Slow path; modified version of Michael-Scott algorithm; see advTail above
       case queue.advTail(el, t)
       of AdvAndInserted: return
       of AdvOnly: continue
