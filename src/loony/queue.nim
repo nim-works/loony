@@ -172,7 +172,7 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
       var w   : uint = prepareElement(el) 
       let prev: uint = fetchAddSlot(t, i, w)
       if prev > 0:
-        warn "FAST PATH PUSH encountered pre-filled slot", prefilled = prev, index = i, new_val = w
+        trace "FAST PATH PUSH encountered pre-filled slot", prefilled = prev, index = i, new_val = w
       ## Since we are assured that the slots would be 0'd, the
       ## slots value should be evaluated to be less than 0 (RESUME
       ## = 1).
@@ -212,10 +212,10 @@ proc pop*(queue: var LoonyQueue): Continuation =
   while true:
     ## Before incrementing the dequeue index, an initial check must be performed
     ## to determine if the queue is empty.
-    var curr = queue.fetchHead()
-    var tail = queue.fetchTail()
     var h,t: NodePtr
     var i,ti: uint16
+    var tail = queue.fetchTail()
+    var curr = queue.fetchHead()  ## Ensure head is loaded last to keep mem hot
     (h, i) = (curr.nptr, curr.idx)
     (t, ti) = (tail.nptr, tail.idx)
     if (i >= N or i >= ti) and (h == t):
@@ -229,12 +229,11 @@ proc pop*(queue: var LoonyQueue): Continuation =
       ## must contain a valid pointer to an enqueued element
       ## that can be returned (see enqueue LINK)
       if unlikely((prev and SLOTMASK) == 0): continue
-      if i == N-1:
+      if i == N-1: ## REVIEW why do we abandon the last index? do we do the same for the push?
         h.tryReclaim(0'u8)
         continue
       if (prev and constants.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
-          echo i
           h.tryReclaim(i + 1)
         var res = cast[Continuation](prev and SLOTMASK)
         assert res != nil
