@@ -42,7 +42,7 @@ proc nptr(tag: TagPtr): NodePtr =
 proc idx(tag: TagPtr): uint16 =
   result = uint16(tag and TAGMASK)
 proc tag(tag: TagPtr): uint16 = tag.idx
-proc `$`(tag: TagPtr): string =
+proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
 
@@ -221,8 +221,8 @@ proc pop*(queue: var LoonyQueue): Continuation =
     (t, ti) = (tail.nptr, tail.idx)
     if (i >= N or i >= ti) and (h == t):
       return nil # Um ok
-    var ntail = queue.fetchIncTail()
-    (h, i) = (ntail.nptr, ntail.idx)
+    var head = queue.fetchIncHead()
+    (h, i) = (head.nptr, head.idx)
     if i < N:
       var prev = h.fetchAddSlot(i, READER)
       ## On the last slot in a node, we initiate the reclaim
@@ -234,7 +234,7 @@ proc pop*(queue: var LoonyQueue): Continuation =
       if (prev and WRITER) != 0:
         if (prev and RESUME) != 0:
           h.tryReclaim(i + 1)
-        return cast[Continuation](prev and PTRMASK)
+        return cast[Continuation](prev and SLOTMASK)
       continue
     else:
       case queue.advHead(curr, h, t)

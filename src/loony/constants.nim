@@ -19,3 +19,5 @@ const
   # Ref-count constants
   SHIFT* = 16      # Shift to access 'high' 16 bits of uint32
   MASK*  = 0xFFFF  # Mask to access 'low' 16 bits of uint32
+  #
+  SLOTMASK*  : uint = high(uint) xor (RESUME or WRITER or READER) # REVIEW cabboose

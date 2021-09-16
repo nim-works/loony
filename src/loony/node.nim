@@ -45,14 +45,18 @@ template deallocNode*(n: NodePtr) =
   freeShared(cast[ptr Node](n))
 
 proc allocNode*(): NodePtr =     # Is this for some reason better if template?
-  var res {.align(NODEALIGN).} = createShared(Node)
-  return res.toNodePtr
+  # var res {.align(NODEALIGN).} = createShared(Node)
+  var res {.align(NODEALIGN).}: Node = Node() # FIXME this is concerning to me; I couldn't allocate shared memory that is aligned correctly; is this threadsafe?
+  # return res.toNodePtr
+  return res.addr().toNodePtr()
 proc allocNode*(el: Continuation): NodePtr =
   ## Allocate a fresh node with the first slot assigned
   ## to element el with the writer slot set
-  var res {.align(NODEALIGN).} = createShared(Node)
-  res[].slots[0].store(el.prepareElement())
-  return res.toNodePtr
+  # var res {.align(NODEALIGN).} = createShared(Node)
+  var res {.align(NODEALIGN).} = Node()
+  res.slots[0].store(el.prepareElement())
+  # return res.toNodePtr
+  return res.addr().toNodePtr()
 
 proc initNode*(): Node =
   var res {.align(NODEALIGN).} = Node(); return res # Should I still use mem alloc createShared?
