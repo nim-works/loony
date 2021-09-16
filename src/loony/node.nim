@@ -5,14 +5,9 @@ import pkg/cps
 
 type
   Node* = object
-    slots* : array[0..N, Atomic[uint]]    # Pointers to object
+    slots* : array[0..N-1, Atomic[uint]]    # Pointers to object
     next*  : Atomic[NodePtr]              # NodePtr - successor node
     ctrl*  : ControlBlock                 # Control block for mem recl
-
-when isMainModule:
-  echo ""
-  var node = alignedAlloc0(sizeof(Node), NODEALIGN)
-  echo cast[uint](node)
 
 template toNodePtr*(pt: uint | ptr Node): NodePtr =  # Convert ptr Node into NodePtr uint
   cast[NodePtr](pt)
@@ -62,23 +57,16 @@ proc allocNode*(el: Continuation): NodePtr =
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
   res[].slots[0].store(el.prepareElement())
-  # return res.toNodePtr
   return res.toNodePtr()
 
-# proc initNode*(): Node =
-#   var res {.align(NODEALIGN).} = Node(); return res # Should I still use mem alloc createShared?
-# proc init*[T: Node](t: T): T =
-#   var res {.align(NODEALIGN).} = Node(); return res
+
 
 proc tryReclaim*(t: NodePtr, start: uint16) =
   for i in start..N:
     var s = t.toNode().slots[i]
     if (s.load() and CONSUMED) != CONSUMED:
       var prev = s.fetchAdd(RESUME) and CONSUMED
-      echo prev
       if prev != CONSUMED:
-        echo i
-        # FIXME I keep hitting a SIGSEV 
         return
   var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
   if flags == (ENQ or DEQ):
@@ -87,13 +75,15 @@ proc tryReclaim*(t: NodePtr, start: uint16) =
 proc incrEnqCount*(t: NodePtr, final: uint16 = 0) =
   var finalCount: uint16 = final
   var mask: ControlMask
+  var currCount: uint16
   if finalCount == 0:
     mask = t.toNode().ctrl.fetchAddTail(1)
     finalCount = mask.getHigh()
+    currCount = cast[uint16](1 + (mask and MASK))
   else:
     var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
     mask = t.toNode().ctrl.fetchAddTail(v)
-  var currCount = mask.getLow() + 1
+    currCount = cast[uint16](1 + (mask and MASK))
   if currCount == finalCount:
     var prev = t.toNode().ctrl.fetchAddReclaim(ENQ)
     if prev == (DEQ or SLOT):
@@ -102,13 +92,15 @@ proc incrEnqCount*(t: NodePtr, final: uint16 = 0) =
 proc incrDeqCount*(t: NodePtr, final: uint16 = 0) =
   var finalCount: uint16 = final
   var mask: ControlMask
+  var currCount: uint16
   if finalCount == 0:
-    mask = t.toNode().ctrl.fetchAddHead(1)
+    mask = t.toNode().ctrl.fetchAddTail(1)
     finalCount = mask.getHigh()
+    currCount = cast[uint16](1 + (mask and MASK))
   else:
     var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
-    mask = t.toNode().ctrl.fetchAddHead(v)
-  var currCount = mask.getLow() + 1
+    mask = t.toNode().ctrl.fetchAddTail(v)
+    currCount = cast[uint16](1 + (mask and MASK))
   if currCount == finalCount:
     var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)   # The article ommits the deq
     if prev == (ENQ or SLOT):                         # algorithm but I'm guessing i

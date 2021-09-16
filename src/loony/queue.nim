@@ -231,12 +231,13 @@ proc pop*(queue: var LoonyQueue): Continuation =
       if unlikely((prev and SLOTMASK) == 0): continue
       if i == N-1:
         h.tryReclaim(0'u8)
+        continue
       if (prev and constants.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
           echo i
           h.tryReclaim(i + 1)
         var res = cast[Continuation](prev and SLOTMASK)
-        GC_unref(res)
+        assert res != nil
         return res
       continue
     else:
