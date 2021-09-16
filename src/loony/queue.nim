@@ -87,7 +87,6 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
   ## since the slow path is rarely entered. CHORE okay fine I'll include some docs
   ## but I'm tired
   var null = 0'u
-  var fincount: uint16
   while true:
     var curr: TagPtr = queue.fetchTail()
     if t != curr.nptr:
@@ -104,8 +103,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
           if t != curr.nptr:
             t.incrEnqCount()
             return AdvAndInserted
-        fincount = curr.idx - N
-        t.incrEnqCount(fincount)
+        t.incrEnqCount(curr.idx - N)
         return AdvAndInserted
       else:
         # deallocNode(node) TODO; dealloc mem
@@ -116,8 +114,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         if t != curr.nptr:
           t.incrEnqCount()
           return AdvOnly
-      fincount = curr.idx - N
-      t.incrEnqCount(fincount)
+      t.incrEnqCount(curr.idx - N)
       return AdvOnly
 
 
@@ -134,8 +131,7 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
     if curr.nptr != h:
       h.incrDeqCount()
       return Advanced
-  var fincount = curr.idx - N
-  h.incrDeqCount(fincount)
+  h.incrDeqCount(curr.idx - N)
   return Advanced
 
 
@@ -162,7 +158,7 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
 ## to announce both operations completion (in case of a read) and also
 ## makes determining the order in which two operations occured possible.
 
-proc enqueue*(queue: var LoonyQueue, el: Continuation) =
+proc push*(queue: var LoonyQueue, el: Continuation) =
   while true:
     ## The enqueue procedure begins with incrementing the
     ## index of the associated node in the TagPtr
@@ -209,7 +205,7 @@ proc isEmpty*(queue: var LoonyQueue): bool =
     return true
   return false
 
-proc deque*(queue: var LoonyQueue): Continuation =
+proc pop*(queue: var LoonyQueue): Continuation =
   while true:
     ## Before incrementing the dequeue index, an initial check must be performed
     ## to determine if the queue is empty. The article contains an algorithm
@@ -238,7 +234,7 @@ proc deque*(queue: var LoonyQueue): Continuation =
       if (prev and WRITER) != 0:
         if (prev and RESUME) != 0:
           h.tryReclaim(i + 1)
-        return cast[Continuation](prev and PTR_MASK) # TODO: define PTR_MASK
+        return cast[Continuation](prev and PTRMASK)
       continue
     else:
       case queue.advHead(curr, h, t)

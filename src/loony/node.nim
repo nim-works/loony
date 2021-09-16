@@ -70,7 +70,8 @@ proc tryReclaim*(t: NodePtr, start: uint16) =
   if flags == (ENQ or DEQ):
     deallocNode(t)
 
-proc incrEnqCount*(t: NodePtr, finalCount: var uint16 = 0) =
+proc incrEnqCount*(t: NodePtr, final: uint16 = 0) =
+  var finalCount: uint16 = final
   var mask: ControlMask
   if finalCount == 0:
     mask = t.toNode().ctrl.fetchAddTail(1)
@@ -84,7 +85,8 @@ proc incrEnqCount*(t: NodePtr, finalCount: var uint16 = 0) =
     if prev == (DEQ or SLOT):
       deallocNode(t)
 
-proc incrDeqCount*(t: NodePtr, finalCount: var uint16 = 0) =
+proc incrDeqCount*(t: NodePtr, final: uint16 = 0) =
+  var finalCount: uint16 = final
   var mask: ControlMask
   if finalCount == 0:
     mask = t.toNode().ctrl.fetchAddHead(1)
