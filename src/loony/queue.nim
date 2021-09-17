@@ -266,7 +266,7 @@ proc initLoonyQueue*(): LoonyQueue = # So I should definitely have a destroy pro
   result.head.store(headTag)
   result.tail.store(tailTag)
   result.currTail.store(tailTag)
-  for i in 0..N:
+  for i in 0..<N:
     var h = headTag.toNode().slots[i].load()
     var t = tailTag.toNode().slots[i].load()
     assert h == 0, "Slot found to not be nil on initialisation"
