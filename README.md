@@ -12,5 +12,4 @@ I originally just wanted a high throughput MPMC queue for [CPS](https://github.c
 
 ## Current State
 
-Base foundation has been laid out. Need to work on the memory reclamation and making it `_correct_`.
-
+Doesn't seem to work with ORC. The last `=destroy` called on any ref object in another thread causes a crash. However with ARC, there is no such issue and the allocCount and deallocCount matches perfectly on my abstract tests. So far I consider this to be functional at its core with stress testing to follow up and then performance benchmarking.
