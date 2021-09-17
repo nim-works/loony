@@ -71,7 +71,7 @@ proc tryReclaim*(t: NodePtr, start: uint16) =
     # echo "Slot current val ", s.load()
     if (s.load() and CONSUMED) != CONSUMED:
       var prev = s.fetchAdd(RESUME) and CONSUMED
-      echo prev
+      # echo prev
       if prev != CONSUMED:
         return
   var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
