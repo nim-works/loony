@@ -41,22 +41,22 @@ template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool
   (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 
 template deallocNode*(n: var Node) =
-  echo "deallocd"
+  # echo "deallocd"
   deallocAligned(n.addr, NODEALIGN.int)
   
 template deallocNode*(n: NodePtr) =
-  echo "deallocd"
+  # echo "deallocd"
   deallocAligned(cast[pointer](n), NODEALIGN.int)
 
 
 proc allocNode*(): NodePtr =     # Is this for some reason better if template?
-  echo "allocd"
+  # echo "allocd"
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
   result = res.toNodePtr()
 
 proc allocNode*(el: Continuation): NodePtr =
-  echo "allocd"
+  # echo "allocd"
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
   res[].slots[0].store(el.prepareElement())
