@@ -110,7 +110,7 @@ proc advTail(queue: var LoonyQueue, el: Continuation, t: NodePtr): AdvTail =
         if t != curr.nptr:
           t.incrEnqCount()
           return AdvOnly
-      t.incrEnqCount(curr.idx - N)
+      t.incrEnqCount(curr.idx - (N-1))
       return AdvOnly
 
 
@@ -126,7 +126,7 @@ proc advHead(queue: var LoonyQueue, curr: var TagPtr, h,t: NodePtr): AdvHead =
     if curr.nptr != h:
       h.incrDeqCount()
       return Advanced
-  h.incrDeqCount(curr.idx - N)
+  h.incrDeqCount(curr.idx - (N-1))
   return Advanced
 
 

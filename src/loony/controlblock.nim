@@ -12,7 +12,7 @@ type
     tailMask* : Atomic[ControlMask]     # (uint16, uint16)  4 bytes
     ## Bitmask for storing current reclamation status
     ## All 3 bits set = node can be reclaimed
-    reclaim*  : Atomic[ uint8]     #                   1 byte
+    reclaim*  : Atomic[uint8]     #                   1 byte
 
 proc getHigh*(mask: ControlMask): uint16 =
   return cast[uint16](mask shr SHIFT)

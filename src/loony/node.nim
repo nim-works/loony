@@ -21,7 +21,6 @@ template toUInt*(nodeptr: ptr Node): uint =          # Equivalent to toNodePtr
 proc prepareElement*(el: Continuation): uint =
   GC_ref(el)
   return (cast[uint](el) or WRITER)  # BIT or
-  # (cast[uint](el))  # BIT or
 
 template fetchNext*(node: Node): NodePtr = node.next.load()
 template fetchNext*(node: NodePtr): NodePtr =
@@ -42,18 +41,22 @@ template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool
   (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 
 template deallocNode*(n: var Node) =
+  echo "deallocd"
   deallocAligned(n.addr, NODEALIGN.int)
   
 template deallocNode*(n: NodePtr) =
+  echo "deallocd"
   deallocAligned(cast[pointer](n), NODEALIGN.int)
 
 
 proc allocNode*(): NodePtr =     # Is this for some reason better if template?
+  echo "allocd"
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
   result = res.toNodePtr()
 
 proc allocNode*(el: Continuation): NodePtr =
+  echo "allocd"
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
   res[].slots[0].store(el.prepareElement())
@@ -62,13 +65,17 @@ proc allocNode*(el: Continuation): NodePtr =
 
 
 proc tryReclaim*(t: NodePtr, start: uint16) =
-  for i in start..N:
+  # echo "trying to reclaim"
+  for i in start..N-1:
     var s = t.toNode().slots[i]
+    # echo "Slot current val ", s.load()
     if (s.load() and CONSUMED) != CONSUMED:
       var prev = s.fetchAdd(RESUME) and CONSUMED
+      echo prev
       if prev != CONSUMED:
         return
   var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
+  # echo "Try reclaim flag ", flags
   if flags == (ENQ or DEQ):
     deallocNode(t)
 
@@ -86,6 +93,8 @@ proc incrEnqCount*(t: NodePtr, final: uint16 = 0) =
     currCount = cast[uint16](1 + (mask and MASK))
   if currCount == finalCount:
     var prev = t.toNode().ctrl.fetchAddReclaim(ENQ)
+    # echo "IncrEnqCount prev ", prev
+    # echo "IncrEnqCount new ", t.toNode().ctrl.reclaim.load()
     if prev == (DEQ or SLOT):
       deallocNode(t)
 
@@ -93,15 +102,21 @@ proc incrDeqCount*(t: NodePtr, final: uint16 = 0) =
   var finalCount: uint16 = final
   var mask: ControlMask
   var currCount: uint16
+  # echo "Incrementing deq count"
   if finalCount == 0:
     mask = t.toNode().ctrl.fetchAddTail(1)
     finalCount = mask.getHigh()
     currCount = cast[uint16](1 + (mask and MASK))
+    # echo "If finalcount == 0, vals ", finalCount, " ", currCount
   else:
     var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
     mask = t.toNode().ctrl.fetchAddTail(v)
     currCount = cast[uint16](1 + (mask and MASK))
+  #   echo "finalcount != 0, vals ", finalCount, " ", currCount
+  # echo "Finalcount & currCount, vals ", finalCount, " ", currCount
   if currCount == finalCount:
     var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)   # The article ommits the deq
+    # echo "IncrDEQCount prev ", prev
+    # echo "IncrDEQCount new ", t.toNode().ctrl.reclaim.load()
     if prev == (ENQ or SLOT):                         # algorithm but I'm guessing i
       deallocNode(t)                                  # swap these vals to DEQ and ENQ
