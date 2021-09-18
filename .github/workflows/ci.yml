@@ -5,7 +5,7 @@ on:
 
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
       - '*'
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['macos-latest'] #, 'ubuntu-latest']
+        os: ['macos-latest', 'ubuntu-latest', 'windows-latest']
         nim: ['devel']
     name: '${{ matrix.os }} (${{ matrix.nim }})'
     runs-on: ${{ matrix.os }}
@@ -86,7 +86,7 @@ jobs:
 
       - name: Publish docs
         if: >
-          github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
           matrix.os == 'macos-latest' && matrix.nim == 'devel'
         uses: crazy-max/ghaction-github-pages@v2.5.0
         with:
