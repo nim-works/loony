@@ -38,6 +38,7 @@ type
 ## large number of thread contention.
 
 proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
+proc node(tag: TagPtr): var Node = cast[ptr Node](tag.nptr)[]
 proc idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
 proc tag(tag: TagPtr): uint16 = tag.idx
 proc toStrTuple*(tag: TagPtr): string =
@@ -92,12 +93,12 @@ proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   while true:
     var tail = queue.fetchTail
     if t != tail.nptr:
-      t.incrEnqCount()
+      incrEnqCount t.toNode
       result = AdvOnly
       break
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
-      var node = allocNode el
+      var node: uint = cast[uint](allocNode el)
       null = 0'u
       if t.compareAndSwapNext(null, node):
         null = 0'u
@@ -105,13 +106,13 @@ proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
         block done:
           while not queue.compareAndSwapTail(null, tag): # T11
             if t != tail.nptr:
-              t.incrEnqCount()
+              incrEnqCount t.toNode
               break done
-          t.incrEnqCount(tail.idx - N)
+          incrEnqCount(t.toNode, tail.idx - N)
         result = AdvAndInserted
         break
       else:
-        deallocNode(node)
+        `=destroy`(cast[ptr Node](node)[])
     else: # T20
       result = AdvOnly
       null = 0'u
@@ -119,18 +120,18 @@ proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
         # next+1 translates to (nptr: next, idx: 1)
         while not queue.compareAndSwapTail(null, next+1):
           if t != tail.nptr:
-            t.incrEnqCount()
+            incrEnqCount t.toNode
             break done
-        t.incrEnqCount(tail.idx - (N-1))
+        incrEnqCount(t.toNode, tail.idx - (N-1))
       break
 
 proc advHead(queue: var LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
-  h.tryReclaim(0'u8)  # As done in cpp impl
+  tryReclaim(h.toNode, 0'u8)  # As done in cpp impl
   var next = fetchNext h
   result =
     if cast[ptr Node](next).isNil() or (t == h):
-      h.incrDeqCount()
+      incrDeqCount h.toNode
       QueueEmpty
     else:
       # Equivalent to (nptr: NodePtr, idx: idx+=1)
@@ -139,9 +140,9 @@ proc advHead(queue: var LoonyQueue; curr: var TagPtr;
       block done:
         while not queue.compareAndSwapHead(curr, next.nptr):
           if curr.nptr != h:
-            h.incrDeqCount()
+            incrDeqCount h.toNode
             break done
-        h.incrDeqCount(curr.idx - (N-1))
+        incrDeqCount(h.toNode, curr.idx - (N-1))
       Advanced
 
 ## Fundamentally, both enqueue and dequeue operations attempt to
@@ -197,7 +198,7 @@ proc push*[T](queue: var LoonyQueue[T], el: T) =
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
         ## on the same node.
-        tryReclaim(tag.nptr, tag.idx + 1)
+        tryReclaim(tag.node, tag.idx + 1)
       else:
         ## Should the case above occur or we detect that the slot has been
         ## filled by some gypsy magic then we will retry on the next loop.
@@ -247,11 +248,11 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
         if false and head.idx == N-1:
           # why do we abandon the last index?
           # do we do the same for the push?
-          tryReclaim(head.nptr, 0'u8)
+          tryReclaim(head.node, 0'u8)
         else:
           if (prev and spec.WRITER) != 0:
             if unlikely((prev and RESUME) != 0):
-              tryReclaim(head.nptr, head.idx + 1)
+              tryReclaim(head.node, head.idx + 1)
             result = cast[T](prev and SLOTMASK)
             assert result != nil
             GC_unref result
@@ -282,7 +283,7 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
 
 proc initLoonyQueue*(q: var LoonyQueue) =
   ## Initialize an existing LoonyQueue.
-  var headTag = allocNode()
+  var headTag = cast[uint](allocNode())
   var tailTag = headTag
   q.head.store headTag
   q.tail.store tailTag

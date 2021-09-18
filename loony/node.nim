@@ -51,79 +51,75 @@ template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool
   # Dumb, this needs to have expect be variable
   (toNode t).next.compareExchange(expect, swap)
 
-template deallocNode*(n: var Node) =
+proc `=destroy`*(n: var Node) =
   # echo "deallocd"
   deallocAligned(n.addr, NODEALIGN.int)
 
-template deallocNode*(n: NodePtr) =
-  # echo "deallocd"
-  deallocAligned(cast[pointer](n), NODEALIGN.int)
-
-proc allocNode*(): NodePtr =
+proc allocNode*(): ptr Node =
   # echo "allocd"
-  result = cast[NodePtr](allocAligned0(sizeof(Node), NODEALIGN.int))
-  cast[ptr Node](result)[] = Node()
+  cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
 
-proc allocNode*[T](el: T): NodePtr =
+proc allocNode*[T](el: T): ptr Node =
   # echo "allocd"
   result = allocNode()
-  cast[ptr Node](result)[].slots[0].store(prepareElement el)
+  result.slots[0].store(prepareElement el)
 
-proc tryReclaim*(t: NodePtr, start: uint16) =
+proc tryReclaim*(node: var Node; start: uint16) =
   # echo "trying to reclaim"
-  for i in start..N-1:
-    var s = t.toNode().slots[i]
-    # echo "Slot current val ", s.load()
-    if (s.load() and CONSUMED) != CONSUMED:
-      var prev = s.fetchAdd(RESUME) and CONSUMED
-      # echo prev
-      if prev != CONSUMED:
-        return
-  var flags = t.toNode().ctrl.fetchAddReclaim(SLOT)
-  # echo "Try reclaim flag ", flags
-  if flags == (ENQ or DEQ):
-    deallocNode(t)
+  block done:
+    for i in start ..< N:
+      template s: Atomic[uint] = node.slots[i]
+      # echo "Slot current val ", s.load()
+      if (s.load() and CONSUMED) != CONSUMED:
+        var prev = s.fetchAdd(RESUME) and CONSUMED
+        # echo prev
+        if prev != CONSUMED:
+          break done
+    var flags = node.ctrl.fetchAddReclaim(SLOT)
+    # echo "Try reclaim flag ", flags
+    if flags == (ENQ or DEQ):
+      `=destroy` node
 
-proc incrEnqCount*(t: NodePtr, final: uint16 = 0) =
+proc incrEnqCount*(node: var Node; final: uint16 = 0) =
   var finalCount: uint16 = final
   var mask: ControlMask
   var currCount: uint16
   if finalCount == 0:
-    mask = t.toNode().ctrl.fetchAddTail(1)
+    mask = node.ctrl.fetchAddTail(1)
     finalCount = mask.getHigh()
     currCount = cast[uint16](1 + (mask and MASK))
   else:
     var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
-    mask = t.toNode().ctrl.fetchAddTail(v)
+    mask = node.ctrl.fetchAddTail(v)
     currCount = cast[uint16](1 + (mask and MASK))
   if currCount == finalCount:
-    var prev = t.toNode().ctrl.fetchAddReclaim(ENQ)
+    var prev = node.ctrl.fetchAddReclaim(ENQ)
     # echo "IncrEnqCount prev ", prev
     # echo "IncrEnqCount new ", t.toNode().ctrl.reclaim.load()
     if prev == (DEQ or SLOT):
-      deallocNode(t)
+      `=destroy` node
 
-proc incrDeqCount*(t: NodePtr, final: uint16 = 0) =
+proc incrDeqCount*(node: var Node; final: uint16 = 0) =
   var finalCount: uint16 = final
   var mask: ControlMask
   var currCount: uint16
   # echo "Incrementing deq count"
   if finalCount == 0:
-    mask = t.toNode().ctrl.fetchAddTail(1)
+    mask = node.ctrl.fetchAddTail(1)
     finalCount = mask.getHigh()
     currCount = cast[uint16](1 + (mask and MASK))
     # echo "If finalcount == 0, vals ", finalCount, " ", currCount
   else:
     var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
-    mask = t.toNode().ctrl.fetchAddTail(v)
+    mask = node.ctrl.fetchAddTail(v)
     currCount = cast[uint16](1 + (mask and MASK))
   #   echo "finalcount != 0, vals ", finalCount, " ", currCount
   # echo "Finalcount & currCount, vals ", finalCount, " ", currCount
   if currCount == finalCount:
-    var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)
+    var prev = node.ctrl.fetchAddReclaim(DEQ)
     # The article omits the deq algorithm but I'm guessing i swap these
     # vals to DEQ and ENQ
     # echo "IncrDEQCount prev ", prev
     # echo "IncrDEQCount new ", t.toNode().ctrl.reclaim.load()
     if prev == (ENQ or SLOT):
-      deallocNode(t)
+      `=destroy` node
