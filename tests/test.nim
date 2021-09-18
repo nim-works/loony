@@ -2,14 +2,13 @@ import std/atomics
 import std/os
 import std/macros
 
-import cps
 import balls
+import cps
 
 import loony
 
-# Moment of truth
-var queue = createShared LoonyQueue[Continuation]
-initLoonyQueue queue[]
+const
+  continuations = 5_000
 
 type
   C = ref object of Continuation
@@ -18,9 +17,7 @@ type
     q: ptr LoonyQueue[Continuation]
 
 proc dealloc(c: C; E: typedesc[C]): E =
-  echo "reached dealloc"
-
-var targ = ThreadArg(q: queue)
+  checkpoint "reached dealloc"
 
 proc runThings(targ: ThreadArg) {.thread.} =
   var q = targ.q
@@ -28,52 +25,58 @@ proc runThings(targ: ThreadArg) {.thread.} =
   var prev: C
   var str: string
   while i < 50:
-    # echo str
+    # checkpoint str
     var job = pop q[]
     if job == nil:
-      # echo "nil"
+      # checkpoint "nil"
       inc(i)
       sleep(50)
     else:
       while job.running():
         job = trampoline job
         str.add('C')
-        # echo str
-        # echo job.running()
+        # checkpoint str
+        # checkpoint job.running()
         # i = 0
-  echo "Finished"
 
-var counter {.global.}: Atomic[int]
-
-
-# expandMacros:
-proc pass(cFrom,cTo: C): C =
+proc pass(cFrom, cTo: C): C =
   cTo.q = cFrom.q
   return cTo
 
-proc register(c: C): C {.cpsMagic.} =
+proc enqueue(c: C): C {.cpsMagic.} =
   c.q[].push(c)
-  return nil
 
-proc doContinualThings() {.cps:C.} =
+var counter {.global.}: Atomic[int]
+
+proc doContinualThings() {.cps: C.} =
   var orig = getThreadId()
-  # echo "WOAH ", orig
-  register()
+  # checkpoint "WOAH ", orig
+  enqueue()
   discard counter.fetchAdd(1)
-  register()
-  # echo "end"
+  enqueue()
+  # checkpoint "end"
   orig = 5
 
+suite "loony":
+  var queue: ptr LoonyQueue[Continuation]
 
-var thr: Thread[ThreadArg]
-var thr2: Thread[ThreadArg]
-var thr3: Thread[ThreadArg]
+  block:
+    ## creation and initialization of the queue
 
-dumpAllocStats:
-  for i in 0..5000:
-    var c = whelp doContinualThings()
-    c.q = queue
-    queue[].push(c)
-  createThread(thr, runThings, targ)
-  joinThread(thr)
-  echo counter.load()
+    # Moment of truth
+    queue = createShared LoonyQueue[Continuation]
+    initLoonyQueue queue[]
+
+  block:
+    ## run some continuations through the queue in another thread
+    var targ = ThreadArg(q: queue)
+    var thr: Thread[ThreadArg]
+
+    dumpAllocStats:
+      for i in 0 ..< continuations:
+        var c = whelp doContinualThings()
+        c.q = queue
+        discard enqueue c
+      createThread(thr, runThings, targ)
+      joinThread thr
+      check counter.load() == continuations
