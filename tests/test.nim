@@ -1,3 +1,4 @@
+import std/osproc
 import std/strutils
 import std/logging
 import std/atomics
@@ -10,8 +11,9 @@ import cps
 import loony
 
 const
-  continuationCount = 1_000_000
-  threadCount = 10
+  continuationCount = when defined(windows): 1_000 else: 10_000
+let
+  threadCount = when defined(danger): countProcessors() else: 1
 
 type
   C = ref object of Continuation
@@ -32,24 +34,13 @@ proc dealloc(c: C; E: typedesc[C]): E =
   checkpoint "reached dealloc"
 
 proc runThings(targ: ThreadArg) {.thread.} =
-  var q = targ.q
-  var i: int
-  var prev: C
-  var str: string
-  while i < 50:
-    # checkpoint str
-    var job = pop q[]
-    if job == nil:
-      # checkpoint "nil"
-      inc(i)
-      sleep(50)
+  while true:
+    var job = pop targ.q[]
+    if job.dismissed:
+      break
     else:
-      while job.running():
+      while job.running:
         job = trampoline job
-        str.add('C')
-        # checkpoint str
-        # checkpoint job.running()
-        # i = 0
 
 proc pass(cFrom, cTo: C): C =
   cTo.q = cFrom.q
@@ -60,14 +51,31 @@ proc enqueue(c: C): C {.cpsMagic.} =
 
 var counter {.global.}: Atomic[int]
 
+# try to delay a reasonable amount of time despite platform
+when defined(windows):
+  proc noop(c: C): C {.cpsMagic.} =
+    sleep:
+      when defined(danger):
+        1
+      else:
+        0 # 🤔
+    c
+else:
+  import posix
+  proc noop(c: C): C {.cpsMagic.} =
+    const
+      ns = when defined(danger): 1_000 else: 10_000
+    var x = Timespec(tv_sec: 0.Time, tv_nsec: ns)
+    var y: Timespec
+    if 0 != nanosleep(x, y):
+      raise
+    c
+
 proc doContinualThings() {.cps: C.} =
-  var orig = getThreadId()
-  # checkpoint "WOAH ", orig
+  enqueue()
+  noop()
   enqueue()
   discard counter.fetchAdd(1)
-  enqueue()
-  # checkpoint "end"
-  orig = 5
 
 template expectCounter(n: int): untyped =
   ## convenience
@@ -89,7 +97,8 @@ suite "loony":
     initLoonyQueue queue[]
 
   block:
-    ## run some continuationCount through the queue in another thread
+    ## run some continuations through the queue in another thread
+    when defined(danger): skip "boring"
     var targ = ThreadArg(q: queue)
     var thr: Thread[ThreadArg]
 
@@ -105,23 +114,25 @@ suite "loony":
 
   block:
     ## run some continuations through the queue in many threads
+    when not defined(danger): skip "slow"
     var targ = ThreadArg(q: queue)
     var threads: seq[Thread[ThreadArg]]
     threads.newSeq threadCount
 
     counter.store 0
     dumpAllocStats:
-      for j in 0 ..< threadCount:
-        for i in 0 ..< continuationCount:
-          var c = whelp doContinualThings()
-          c.q = queue
-          discard enqueue c
-      checkpoint "queued $# continuations" %
-        [ $(threadCount * continuationCount) ]
+      for i in 0 ..< continuationCount:
+        var c = whelp doContinualThings()
+        c.q = queue
+        discard enqueue c
+      checkpoint "queued $# continuations" % [ $continuationCount ]
+
       for thread in threads.mitems:
         createThread(thread, runThings, targ)
       checkpoint "created $# threads" % [ $threadCount ]
+
       for thread in threads.mitems:
         joinThread thread
       checkpoint "joined $# threads" % [ $threadCount ]
-      expectCounter continuationCount * threadCount
+
+      expectCounter continuationCount
