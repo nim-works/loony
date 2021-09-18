@@ -70,3 +70,15 @@ proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1): ControlMask =
 
 proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1): uint8 =
   ctrl.reclaim.fetchAdd(v)
+
+when defined(loonyDebug):
+  import std/logging
+  export debug, info, notice, warn, error, fatal
+else:
+  # use the `$` converter just to ensure that debugging statements compile
+  template debug*(args: varargs[untyped, `$`]): untyped = discard
+  template info*(args: varargs[untyped, `$`]): untyped = discard
+  template notice*(args: varargs[untyped, `$`]): untyped = discard
+  template warn*(args: varargs[untyped, `$`]): untyped = discard
+  template error*(args: varargs[untyped, `$`]): untyped = discard
+  template fatal*(args: varargs[untyped, `$`]): untyped = discard
