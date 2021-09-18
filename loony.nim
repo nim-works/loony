@@ -13,7 +13,7 @@ import loony/node
 # raise Defect(nil)
 
 type
-  LoonyQueue*[T: ref] = object
+  LoonyQueue*[T: ref] = ref object
     head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
     tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
     currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
@@ -49,35 +49,35 @@ proc fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
-template fetchTail(queue: var LoonyQueue): TagPtr =
+template fetchTail(queue: LoonyQueue): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
   TagPtr(load queue.tail)
 
-template fetchHead(queue: var LoonyQueue): TagPtr =
+template fetchHead(queue: LoonyQueue): TagPtr =
   ## get the TagPtr of the head (nptr: NodePtr, idx: uint16)
   TagPtr(load queue.head)
 
-template maneAndTail(queue: var LoonyQueue): (TagPtr, TagPtr) =
+template maneAndTail(queue: LoonyQueue): (TagPtr, TagPtr) =
   (fetchHead queue, fetchTail queue)
-template tailAndMane(queue: var LoonyQueue): (TagPtr, TagPtr) =
+template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
   (fetchTail queue, fetchHead queue)
 
-template fetchCurrTail(queue: var LoonyQueue): NodePtr =
+template fetchCurrTail(queue: LoonyQueue): NodePtr =
   ## get the NodePtr of the current tail
   cast[NodePtr](load queue.currTail)
 
-template fetchIncTail(queue: var LoonyQueue): TagPtr =
+template fetchIncTail(queue: LoonyQueue): TagPtr =
   ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.tail.fetchAdd(1))
 
-template fetchIncHead(queue: var LoonyQueue): TagPtr =
+template fetchIncHead(queue: LoonyQueue): TagPtr =
   ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.head.fetchAdd(1))
 
-template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
 
-template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
 ## Both enqueue and dequeue enter FAST PATH operations 99% of the time,
@@ -87,7 +87,7 @@ template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint 
 ## This path requires the threads to first help updating the linked list
 ## struct before retrying and entering the fast path in the next attempt.
 
-proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
+proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
   var null = 0'u
   while true:
@@ -125,7 +125,7 @@ proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
         incrEnqCount(t.toNode, tail.idx - (N-1))
       break
 
-proc advHead(queue: var LoonyQueue; curr: var TagPtr;
+proc advHead(queue: LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
   tryReclaim(h.toNode, 0'u8)  # As done in cpp impl
   var next = fetchNext h
@@ -174,7 +174,7 @@ proc advHead(queue: var LoonyQueue; curr: var TagPtr;
 ## announce both operations completion (in case of a read) and also makes
 ## determining the order in which two operations occured possible.
 
-proc push*[T](queue: var LoonyQueue[T], el: T) =
+proc push*[T](queue: LoonyQueue[T], el: T) =
   while true:
     ## The enqueue procedure begins with incrementing the
     ## index of the associated node in the TagPtr
@@ -222,11 +222,11 @@ proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
   if head.idx >= N or head.idx >= tail.idx:
     result = head.nptr == tail.nptr
 
-proc isEmpty*(queue: var LoonyQueue): bool =
+proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc pop*[T](queue: var LoonyQueue[T]): T =
+proc pop*[T](queue: LoonyQueue[T]): T =
   while true:
     ## Before incrementing the dequeue index, an initial check must be
     ## performed to determine if the queue is empty.
@@ -281,7 +281,7 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
 ## Requires a sufficient number of available bits that are not used to
 ## present the nodes addresses themselves.
 
-proc initLoonyQueue*(q: var LoonyQueue) =
+proc initLoonyQueue*(q: LoonyQueue) =
   ## Initialize an existing LoonyQueue.
   var headTag = cast[uint](allocNode())
   var tailTag = headTag
@@ -296,8 +296,9 @@ proc initLoonyQueue*(q: var LoonyQueue) =
   # I mean the enqueue and dequeue pretty well handle any issues with
   # initialising, but I might as well help allocate the first ones right?
 
-proc initLoonyQueue*(): LoonyQueue =
+proc initLoonyQueue*[T](): LoonyQueue[T] =
   ## Return an initialized LoonyQueue.
   # So I should definitely have a destroy proc to clear the nodes but i
   # do that later
+  new result
   initLoonyQueue result

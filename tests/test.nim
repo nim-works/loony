@@ -17,9 +17,9 @@ let
 
 type
   C = ref object of Continuation
-    q: ptr LoonyQueue[Continuation]
+    q: LoonyQueue[Continuation]
   ThreadArg = object
-    q: ptr LoonyQueue[Continuation]
+    q: LoonyQueue[Continuation]
 
 addHandler newConsoleLogger()
 setLogFilter:
@@ -35,7 +35,7 @@ proc dealloc(c: C; E: typedesc[C]): E =
 
 proc runThings(targ: ThreadArg) {.thread.} =
   while true:
-    var job = pop targ.q[]
+    var job = pop targ.q
     if job.dismissed:
       break
     else:
@@ -47,7 +47,7 @@ proc pass(cFrom, cTo: C): C =
   return cTo
 
 proc enqueue(c: C): C {.cpsMagic.} =
-  c.q[].push(c)
+  c.q.push(c)
 
 var counter {.global.}: Atomic[int]
 
@@ -87,14 +87,13 @@ template expectCounter(n: int): untyped =
     raise
 
 suite "loony":
-  var queue: ptr LoonyQueue[Continuation]
+  var queue: LoonyQueue[Continuation]
 
   block:
     ## creation and initialization of the queue
 
     # Moment of truth
-    queue = createShared LoonyQueue[Continuation]
-    initLoonyQueue queue[]
+    queue = initLoonyQueue[Continuation]()
 
   block:
     ## run some continuations through the queue in another thread
