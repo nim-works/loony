@@ -180,10 +180,10 @@ proc push*[T](queue: var LoonyQueue[T], el: T) =
       var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(tag.nptr, tag.idx, w)
       if prev > 0:
-        debugEcho "FAST PATH PUSH encountered pre-filled slot"
-        debugEcho "prefilled: ", prev.repr
-        debugEcho "index: ", tag.idx
-        debugEcho "new val: ", w.repr
+        warn "FAST PATH PUSH encountered pre-filled slot"
+        warn "prefilled: ", prev.repr
+        warn "index: ", tag.idx
+        warn "new val: ", w.repr
 
       ## Since we are assured that the slots would be 0'd, the slots
       ## value should be evaluated to be less than 0 (RESUME = 1).
