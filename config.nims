@@ -20,3 +20,6 @@ switch("define", "nimPreviewFloatRoundtrip")
 #switch("define", "nimArcDebug")
 #switch("define", "traceCollector")
 #switch("define", "nimArcIds")
+
+# may as well leave this on since it doesn't work in refc
+switch("gc", "arc")
