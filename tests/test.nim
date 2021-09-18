@@ -1,3 +1,5 @@
+import std/strutils
+import std/logging
 import std/atomics
 import std/os
 import std/macros
@@ -8,13 +10,23 @@ import cps
 import loony
 
 const
-  continuations = 5_000
+  continuationCount = 1_000_000
+  threadCount = 10
 
 type
   C = ref object of Continuation
     q: ptr LoonyQueue[Continuation]
   ThreadArg = object
     q: ptr LoonyQueue[Continuation]
+
+addHandler newConsoleLogger()
+setLogFilter:
+  when defined(danger):
+    lvlNotice
+  elif defined(release):
+    lvlInfo
+  else:
+    lvlDebug
 
 proc dealloc(c: C; E: typedesc[C]): E =
   checkpoint "reached dealloc"
@@ -57,6 +69,15 @@ proc doContinualThings() {.cps: C.} =
   # checkpoint "end"
   orig = 5
 
+template expectCounter(n: int): untyped =
+  ## convenience
+  try:
+    check counter.load == n
+  except Exception:
+    checkpoint " counter: ", load counter
+    checkpoint "expected: ", n
+    raise
+
 suite "loony":
   var queue: ptr LoonyQueue[Continuation]
 
@@ -68,15 +89,39 @@ suite "loony":
     initLoonyQueue queue[]
 
   block:
-    ## run some continuations through the queue in another thread
+    ## run some continuationCount through the queue in another thread
     var targ = ThreadArg(q: queue)
     var thr: Thread[ThreadArg]
 
+    counter.store 0
     dumpAllocStats:
-      for i in 0 ..< continuations:
+      for i in 0 ..< continuationCount:
         var c = whelp doContinualThings()
         c.q = queue
         discard enqueue c
       createThread(thr, runThings, targ)
       joinThread thr
-      check counter.load() == continuations
+      expectCounter continuationCount
+
+  block:
+    ## run some continuations through the queue in many threads
+    var targ = ThreadArg(q: queue)
+    var threads: seq[Thread[ThreadArg]]
+    threads.newSeq threadCount
+
+    counter.store 0
+    dumpAllocStats:
+      for j in 0 ..< threadCount:
+        for i in 0 ..< continuationCount:
+          var c = whelp doContinualThings()
+          c.q = queue
+          discard enqueue c
+      checkpoint "queued $# continuations" %
+        [ $(threadCount * continuationCount) ]
+      for thread in threads.mitems:
+        createThread(thread, runThings, targ)
+      checkpoint "created $# threads" % [ $threadCount ]
+      for thread in threads.mitems:
+        joinThread thread
+      checkpoint "joined $# threads" % [ $threadCount ]
+      expectCounter continuationCount * threadCount
