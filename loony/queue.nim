@@ -13,10 +13,10 @@ import pkg/cps
 # raise Defect(nil)
 
 type
-  LoonyQueue* = object  # Can't I just have the loony queue as a ref?
-    head     : Atomic[TagPtr]     # (NodePtr, idx)    ## Whereby node contains the slots and idx
-    tail     : Atomic[TagPtr]     # (NodePtr, idx)    ## is the uint16 index of the slot array
-    currTail : Atomic[NodePtr]    # 8 bytes Current NodePtr
+  LoonyQueue*[T] = object
+    head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
+    tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
+    currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
 
   ## Result types for the private
   ## advHead and advTail functions
@@ -37,8 +37,8 @@ type
 ## See Section 5.2 for the paper to see why an overflow would prove impossible
 ## except under extraordinarily large number of thread contention.
 
-template nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
-template idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
+proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
+proc idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
 proc tag(tag: TagPtr): uint16 = tag.idx
 proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
@@ -53,9 +53,9 @@ template fetchHead(queue: var LoonyQueue): TagPtr =
   TagPtr(load queue.head)
 
 template maneAndTail(queue: var LoonyQueue): (TagPtr, TagPtr) =
-  (queue.fetchHead, queue.fetchTail)
+  (fetchHead queue, fetchTail queue)
 template tailAndMane(queue: var LoonyQueue): (TagPtr, TagPtr) =
-  (queue.fetchTail, queue.fetchHead)
+  (fetchTail queue, fetchHead queue)
 
 template fetchCurrTail(queue: var LoonyQueue): NodePtr =
   ## get the NodePtr of the current tail
@@ -82,7 +82,7 @@ template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint 
 ## This path requires the threads to first help updating the linked list  
 ## struct before retrying and entering the fast path in the next attempt. 
 
-proc advTail(queue: var LoonyQueue; el: Continuation; t: NodePtr): AdvTail =
+proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
   var null = 0'u
   while true:
@@ -140,36 +140,36 @@ proc advHead(queue: var LoonyQueue; curr: var TagPtr;
         h.incrDeqCount(curr.idx - (N-1))
       Advanced
 
-## Fundamentally, both enqueue and dequeue operations attempt to          
-## exclusively reserve access to a slot in the array of their associated  
-## queue node by automatically incremementing the appropriate index value 
-## and retrieving the previous value of the index as well as the current  
-## node pointer.                                                          
+## Fundamentally, both enqueue and dequeue operations attempt to
+## exclusively reserve access to a slot in the array of their associated
+## queue node by automatically incremementing the appropriate index value
+## and retrieving the previous value of the index as well as the current
+## node pointer.
 ##
-## Threads that retrieve an index i < N (length of the slots array) gain  
-## *exclusive* rights to perform either write/consume operation on the    
-## corresponding slot.                                                    
+## Threads that retrieve an index i < N (length of the slots array) gain
+## *exclusive* rights to perform either write/consume operation on the
+## corresponding slot.
 ##
-## This guarantees there can only be exactly one of each for any given    
-## slot.                                                                  
+## This guarantees there can only be exactly one of each for any given
+## slot.
 ##
-## Where i < N, we use FAST PATH operations. These operations are         
-## designed to be as fast as possible while only dealing with memory      
-## contention in rare edge cases.                                         
+## Where i < N, we use FAST PATH operations. These operations are
+## designed to be as fast as possible while only dealing with memory
+## contention in rare edge cases.
 ##
 ## if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead
 ## above.
 ##
-## Fetch And Add (FAA) primitives are used for both incrementing index    
-## values as well as performing read(consume) and write operations on     
-## reserved slots which drastically improves scalability compared to      
-## Compare And Swap (CAS) primitives.                                     
+## Fetch And Add (FAA) primitives are used for both incrementing index
+## values as well as performing read(consume) and write operations on
+## reserved slots which drastically improves scalability compared to
+## Compare And Swap (CAS) primitives.
 ##
-## Note that all operations on slots must modify the slots state bits to  
-## announce both operations completion (in case of a read) and also makes 
-## determining the order in which two operations occured possible.        
+## Note that all operations on slots must modify the slots state bits to
+## announce both operations completion (in case of a read) and also makes
+## determining the order in which two operations occured possible.
 
-proc push*(queue: var LoonyQueue, el: Continuation) =
+proc push*[T](queue: var LoonyQueue[T], el: T) =
   while true:
     ## The enqueue procedure begins with incrementing the
     ## index of the associated node in the TagPtr
@@ -215,17 +215,15 @@ proc push*(queue: var LoonyQueue, el: Continuation) =
       of AdvOnly:
         discard
 
-template isEmptyImpl(head, tail: TagPtr): bool =
+proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
   if head.idx >= N or head.idx >= tail.idx:
-    head.nptr == tail.nptr
-  else:
-    false
+    result = head.nptr == tail.nptr
 
 proc isEmpty*(queue: var LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc pop*(queue: var LoonyQueue): Continuation =
+proc pop*[T](queue: var LoonyQueue[T]): T =
   while true:
     ## Before incrementing the dequeue index, an initial check must be    
     ## performed to determine if the queue is empty.                      
@@ -248,7 +246,7 @@ proc pop*(queue: var LoonyQueue): Continuation =
       if (prev and constants.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
           tryReclaim(head.nptr, head.idx + 1)
-        result = cast[Continuation](prev and SLOTMASK)
+        result = cast[T](prev and SLOTMASK)
         assert result != nil
         GC_unref result
         break

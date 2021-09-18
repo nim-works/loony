@@ -8,14 +8,14 @@ import balls
 import loony
 
 # Moment of truth
-var queue = createShared LoonyQueue
+var queue = createShared LoonyQueue[Continuation]
 initLoonyQueue queue[]
 
 type
   C = ref object of Continuation
-    q: ptr LoonyQueue
+    q: ptr LoonyQueue[Continuation]
   ThreadArg = object
-    q: ptr LoonyQueue
+    q: ptr LoonyQueue[Continuation]
 
 proc dealloc(c: C; E: typedesc[C]): E =
   echo "reached dealloc"
@@ -34,13 +34,13 @@ proc runThings(targ: ThreadArg) {.thread.} =
       # echo "nil"
       inc(i)
       sleep(50)
-      continue
-    while job.running():
-      job = trampoline job
-      str.add('C')
-      # echo str
-      # echo job.running()
-      # i = 0
+    else:
+      while job.running():
+        job = trampoline job
+        str.add('C')
+        # echo str
+        # echo job.running()
+        # i = 0
   echo "Finished"
 
 var counter {.global.}: Atomic[int]

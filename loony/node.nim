@@ -9,27 +9,31 @@ type
     next*  : Atomic[NodePtr]              # NodePtr - successor node
     ctrl*  : ControlBlock                 # Control block for mem recl
 
-template toNodePtr*(pt: uint | ptr Node): NodePtr =  # Convert ptr Node into NodePtr uint
+template toNodePtr*(pt: uint | ptr Node): NodePtr =
+  # Convert ptr Node into NodePtr uint
   cast[NodePtr](pt)
-template toNode*(pt: NodePtr | uint): Node =         # Convert NodePtr to ptr Node and deref
+template toNode*(pt: NodePtr | uint): Node =
+  # NodePtr -> ptr Node and deref
   cast[ptr Node](pt)[]
-template toUInt*(node: var Node): uint =             # Get address to node
+template toUInt*(node: var Node): uint =
+  # Get address to node
   cast[uint](node.addr)
-template toUInt*(nodeptr: ptr Node): uint =          # Equivalent to toNodePtr
+template toUInt*(nodeptr: ptr Node): uint =
+  # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-proc prepareElement*(el: Continuation): uint =
+proc prepareElement*[T](el: T): uint =
   GC_ref(el)
   return (cast[uint](el) or WRITER)  # BIT or
 
 template fetchNext*(node: Node): NodePtr = node.next.load()
 template fetchNext*(node: NodePtr): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
-  (node.toNode).next.load()
+  (toNode node).next.load()
 
 template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint = t.slots[idx].fetchAdd(w)
 template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
-  (t.toNode).slots[idx].fetchAdd(w)
+  (toNode t).slots[idx].fetchAdd(w)
 # Fetches the pointer to the object in the slot while atomically increasing the val
 # 
 # Remembering that the pointer has 3 tail bits clear; these are reserved
@@ -38,7 +42,7 @@ template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
   t.next.compareExchange(expect, swap)
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
-  (t.toNode).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
+  (toNode t).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
 
 template deallocNode*(n: var Node) =
   # echo "deallocd"
@@ -55,7 +59,7 @@ proc allocNode*(): NodePtr =     # Is this for some reason better if template?
   res[] = Node()
   result = res.toNodePtr()
 
-proc allocNode*(el: Continuation): NodePtr =
+proc allocNode*[T](el: T): NodePtr =
   # echo "allocd"
   var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
   res[] = Node()
