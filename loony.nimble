@@ -10,6 +10,6 @@ requires "https://github.com/disruptek/cps < 1.0.0"
 
 task test, "run tests for ci":
   when defined(windows):
-    exec "balls.cmd"
+    exec """env GITHUB_ACTIONS="false" balls.cmd"""
   else:
-    exec findExe"balls"
+    exec """env GITHUB_ACTIONS="false" balls"""
