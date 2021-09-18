@@ -1,0 +1,112 @@
+name: CI
+on:
+  schedule:
+    - cron: '30 5 * * *'
+
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - '*'
+
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      # For PRs the path filter check with Github API, so no need to checkout
+      # for them.
+      - if: github.event_name != 'pull_request'
+        name: Checkout (if not PR)
+        uses: actions/checkout@v2
+
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            src:
+              - '**.cfg'
+              - '**.nims'
+              - '**.nim'
+              - '**.nimble'
+              - 'tests/**'
+              - '.github/workflows/ci.yml'
+
+  build:
+    # Build if the files we care about are changed.
+    needs: changes
+    # Make sure to always run regardless of whether the filter success or not.
+    # When the filter fails there won't be an output, so checking for `false`
+    # state is better than checking for `true`.
+    if: needs.changes.outputs.src != 'false'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['macos-latest'] #, 'ubuntu-latest']
+        nim: ['devel']
+    name: '${{ matrix.os }} (${{ matrix.nim }})'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          path: ci
+
+      - name: Setup Nim
+        uses: alaviss/setup-nim@0.1.1
+        with:
+          path: nim
+          version: ${{ matrix.nim }}
+
+      - name: Run examples
+        shell: bash
+        run: |
+          cd ci
+          nimble --accept develop
+          cd examples
+          env GITHUB_ACTIONS=false balls --path=".."
+
+      - name: Run tests
+        shell: bash
+        run: |
+          cd ci
+          nimble --accept develop
+          nimble test
+
+      - name: Build docs
+        if: ${{ matrix.docs }} == 'true'
+        shell: bash
+        run: |
+          cd ci
+          branch=${{ github.ref }}
+          branch=${branch##*/}
+          nimble doc --project --outdir:docs --path="." \
+            '--git.url:https://github.com/${{ github.repository }}' \
+            '--git.commit:${{ github.sha }}' \
+            "--git.devel:$branch" \
+            loony.nim
+          # Ignore failures for older Nim
+          cp docs/{the,}index.html || true
+
+      - name: Publish docs
+        if: >
+          github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+          matrix.os == 'macos-latest' && matrix.nim == 'devel'
+        uses: crazy-max/ghaction-github-pages@v2.5.0
+        with:
+          build_dir: ci/docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Set check-required on this
+  success:
+    needs: build
+    runs-on: ubuntu-latest
+    name: 'All check passes'
+    steps:
+      - run: |
+          echo "This is a workaround for Github's broken software"
