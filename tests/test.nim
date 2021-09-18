@@ -1,9 +1,15 @@
-import cps, macros
-import loony {.all.}
+import std/atomics
+import std/os
+import std/macros
+
+import cps
+import balls
+
+import loony
 
 # Moment of truth
-var queue = createShared(LoonyQueue)
-queue[] = initLoonyQueue()
+var queue = createShared LoonyQueue
+initLoonyQueue queue[]
 
 type
   C = ref object of Continuation
@@ -11,12 +17,11 @@ type
   ThreadArg = object
     q: ptr LoonyQueue
 
-proc dealloc(c: C, E: typedesc[C]): E =
+proc dealloc(c: C; E: typedesc[C]): E =
   echo "reached dealloc"
 
 var targ = ThreadArg(q: queue)
 
-import os
 proc runThings(targ: ThreadArg) {.thread.} =
   var q = targ.q
   var i: int
@@ -24,7 +29,7 @@ proc runThings(targ: ThreadArg) {.thread.} =
   var str: string
   while i < 50:
     # echo str
-    var job = q[].pop()
+    var job = pop q[]
     if job == nil:
       # echo "nil"
       inc(i)
@@ -38,7 +43,6 @@ proc runThings(targ: ThreadArg) {.thread.} =
       # i = 0
   echo "Finished"
 
-import atomics
 var counter {.global.}: Atomic[int]
 
 
@@ -64,6 +68,7 @@ proc doContinualThings() {.cps:C.} =
 var thr: Thread[ThreadArg]
 var thr2: Thread[ThreadArg]
 var thr3: Thread[ThreadArg]
+
 dumpAllocStats:
   for i in 0..5000:
     var c = whelp doContinualThings()
@@ -72,4 +77,3 @@ dumpAllocStats:
   createThread(thr, runThings, targ)
   joinThread(thr)
   echo counter.load()
-  

@@ -1,3 +1,6 @@
+import std/os
+import std/atomics
+
 import cps
 import loony {.all.}
 
@@ -35,11 +38,9 @@ proc register(c: C): C {.cpsMagic.} =
   c.q[].push(c)
   return nil
 
-import atomics
 var counter {.global.}: Atomic[int]
 counter.store(0)
 
-import os
 proc doContinualThings() {.cps:C.} =
   var orig = getThreadId()
   # echo "WOAH ", orig
@@ -58,8 +59,3 @@ dumpAllocstats:
       c = trampoline c
   echo counter.load()
   echo "completed"
-
-
-
-
-
