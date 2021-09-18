@@ -13,7 +13,7 @@ import loony/node
 # raise Defect(nil)
 
 type
-  LoonyQueue*[T] = object
+  LoonyQueue*[T: ref] = object
     head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
     tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
     currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
@@ -27,15 +27,15 @@ type
     QueueEmpty      # 0000_0000
     Advanced        # 0000_0001
 
-## TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of the
-## tail to contain the index of the slot to its corresponding node by aligning
-## the node pointers on allocation. Since the index value is stored in the
-## same memory word as its associated node pointer, the FAA operations could
-## potentially affect both values if too many increments were to occur.
-## This is accounted for in the algorithm and with space for overflow in the
-## alignment.
-## See Section 5.2 for the paper to see why an overflow would prove impossible
-## except under extraordinarily large number of thread contention.
+## TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of
+## the tail to contain the index of the slot to its corresponding node
+## by aligning the node pointers on allocation. Since the index value is
+## stored in the same memory word as its associated node pointer, the FAA
+## operations could potentially affect both values if too many increments
+## were to occur. This is accounted for in the algorithm and with space
+## for overflow in the alignment. See Section 5.2 for the paper to see
+## why an overflow would prove impossible except under extraordinarily
+## large number of thread contention.
 
 proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
 proc idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
@@ -43,6 +43,10 @@ proc tag(tag: TagPtr): uint16 = tag.idx
 proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
+
+proc fetchAddSlot(tag: TagPtr; w: uint): uint =
+  ## A convenience to fetchAdd the node's slot.
+  fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
 template fetchTail(queue: var LoonyQueue): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
@@ -177,38 +181,36 @@ proc push*[T](queue: var LoonyQueue[T], el: T) =
     if likely(tag.idx < N):
       ## We begin by tagging the pointer for el with a WRITER
       ## bit and then perform a FAA.
-      var w   : uint = prepareElement(el)
-      let prev: uint = fetchAddSlot(tag.nptr, tag.idx, w)
-      if prev > 0:
-        warn "FAST PATH PUSH encountered pre-filled slot"
-        warn "prefilled: ", prev.repr
-        warn "index: ", tag.idx
-        warn "new val: ", w.repr
+      var w = prepareElement el
+      let prev = tag.fetchAddSlot w
+      case prev
+      of 0, RESUME:
+        break           # the slot was empty; we're good to go
 
-      ## Since we are assured that the slots would be 0'd, the slots
-      ## value should be evaluated to be less than 0 (RESUME = 1).
-      if prev <= RESUME:
-        break
+      # If however we assess that the READER bit was already set before
+      # we arrived, then the corresponding dequeue operation arrived too
+      # early and we must consequently abandon the slot and retry.
 
-      ## If however we assess that the READER bit was already set before
-      ## we arrived, then the corresponding dequeue operation arrived
-      ## too early and we must consequently abandon the slot and retry
-      if prev == (READER or RESUME):
+      of RESUME or READER:
         ## Checking for the presence of the RESUME bit only pertains to
         ## the memory reclamation mechanism and is only relevant
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
         ## on the same node.
         tryReclaim(tag.nptr, tag.idx + 1)
+      else:
+        ## Should the case above occur or we detect that the slot has been
+        ## filled by some gypsy magic then we will retry on the next loop.
+        discard
 
-      ## Should the case above occur or we detect that the slot has been
-      ## filled by some gypsy magic then we will retry on the next goround.
+      # afaict, this is fine...
+      when false:
+        warn "FAST PATH PUSH encountered pre-filled slot #", tag.idx
+        warn "had flags: ", (prev and (RESUME or CONSUMED))
 
     else:
-
       # Slow path; modified version of Michael-Scott algorithm; see
       # advTail above
-
       case queue.advTail(el, tag.nptr)
       of AdvAndInserted:
         break
@@ -234,22 +236,26 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
 
     var head = queue.fetchIncHead()
     if likely(head.idx < N):
-      var prev = fetchAddSlot(head.nptr, head.idx, READER)
+      var prev = head.fetchAddSlot READER
       # On the last slot in a node, we initiate the reclaim
       # procedure; if the writer bit is set then the upper bits
       # must contain a valid pointer to an enqueued element
       # that can be returned (see enqueue)
-      if unlikely((prev and SLOTMASK) == 0): continue
-      # if i == N-1: ## why do we abandon the last index? do we do the same for the push?
-      #   h.tryReclaim(0'u8)
-      #   continue  ## REVIEW - This operation makes no sense to me and it wasn't in the cpp imp so I killed it
-      if (prev and spec.WRITER) != 0:
-        if unlikely((prev and RESUME) != 0):
-          tryReclaim(head.nptr, head.idx + 1)
-        result = cast[T](prev and SLOTMASK)
-        assert result != nil
-        GC_unref result
-        break
+      if not unlikely((prev and SLOTMASK) == 0):
+        # This operation makes no sense to me and it
+        # wasn't in the cpp imp so I killed it
+        if false and head.idx == N-1:
+          # why do we abandon the last index?
+          # do we do the same for the push?
+          tryReclaim(head.nptr, 0'u8)
+        else:
+          if (prev and spec.WRITER) != 0:
+            if unlikely((prev and RESUME) != 0):
+              tryReclaim(head.nptr, head.idx + 1)
+            result = cast[T](prev and SLOTMASK)
+            assert result != nil
+            GC_unref result
+            break
     else:
       case queue.advHead(curr, head.nptr, tail.nptr)
       of Advanced:

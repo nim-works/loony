@@ -22,3 +22,6 @@ switch("define", "nimPreviewFloatRoundtrip")
 
 # may as well leave this on since it doesn't work in refc
 switch("gc", "arc")
+
+# default to enable debugging for now
+switch("define", "loonyDebug")

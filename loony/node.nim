@@ -22,9 +22,11 @@ template toUInt*(nodeptr: ptr Node): uint =
   # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-proc prepareElement*[T](el: T): uint =
-  GC_ref(el)
-  return (cast[uint](el) or WRITER)  # BIT or
+proc prepareElement*[T: ref](el: T): uint =
+  ## Take an item into the queue; we bump the RC first to ensure
+  ## that no other operations free it, then add the WRITER bit.
+  GC_ref el
+  result = cast[uint](el) or WRITER
 
 template fetchNext*(node: Node): NodePtr =
   node.next.load()
@@ -34,16 +36,13 @@ template fetchNext*(node: NodePtr): NodePtr =
   (toNode node).next.load()
 
 template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint =
+  ## Fetches the pointer to the object in the slot while atomically
+  ## increasing the value by `w`.
+  ##
+  ## Remembering that the pointer has 3 tail bits clear; these are
+  ## reserved and increased atomically to indicate RESUME, READER, WRITER
+  ## statuship.
   t.slots[idx].fetchAdd(w)
-
-template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
-  (toNode t).slots[idx].fetchAdd(w)
-
-# Fetches the pointer to the object in the slot while atomically
-# increasing the val
-#
-# Remembering that the pointer has 3 tail bits clear; these are reserved
-# and increased atomically do indicate RESUME, READER, WRITER statuship.
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
   t.next.compareExchange(expect, swap)
