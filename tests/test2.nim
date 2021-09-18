@@ -5,14 +5,14 @@ import cps
 import loony {.all.}
 
 # Moment of truth
-var queue = createShared(LoonyQueue)
-queue[] = initLoonyQueue()
+var queue = createShared LoonyQueue[Continuation]
+initLoonyQueue queue[]
 
 type
   C = ref object of Continuation
-    q: ptr LoonyQueue
+    q: ptr LoonyQueue[Continuation]
   ThreadArg = object
-    q: ptr LoonyQueue
+    q: ptr LoonyQueue[Continuation]
 
 var targ = ThreadArg(q: queue)
 
