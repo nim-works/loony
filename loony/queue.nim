@@ -1,5 +1,7 @@
 import std/atomics
-import "."/[alias, constants, controlblock, node]
+
+import loony/spec
+import loony/node
 
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
@@ -241,7 +243,7 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
       # if i == N-1: ## why do we abandon the last index? do we do the same for the push?
       #   h.tryReclaim(0'u8)
       #   continue  ## REVIEW - This operation makes no sense to me and it wasn't in the cpp imp so I killed it
-      if (prev and constants.WRITER) != 0:
+      if (prev and spec.WRITER) != 0:
         if unlikely((prev and RESUME) != 0):
           tryReclaim(head.nptr, head.idx + 1)
         result = cast[T](prev and SLOTMASK)

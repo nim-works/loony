@@ -1,5 +1,7 @@
 import std/atomics
-import "."/[constants, controlblock, alias, memalloc]
+
+import loony/spec
+import loony/memalloc
 
 type
   Node* = object
@@ -24,12 +26,16 @@ proc prepareElement*[T](el: T): uint =
   GC_ref(el)
   return (cast[uint](el) or WRITER)  # BIT or
 
-template fetchNext*(node: Node): NodePtr = node.next.load()
+template fetchNext*(node: Node): NodePtr =
+  node.next.load()
+
 template fetchNext*(node: NodePtr): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
   (toNode node).next.load()
 
-template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint = t.slots[idx].fetchAdd(w)
+template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint =
+  t.slots[idx].fetchAdd(w)
+
 template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
   (toNode t).slots[idx].fetchAdd(w)
 
@@ -41,6 +47,7 @@ template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
   t.next.compareExchange(expect, swap)
+
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
   # Dumb, this needs to have expect be variable
   (toNode t).next.compareExchange(expect, swap)
@@ -53,21 +60,15 @@ template deallocNode*(n: NodePtr) =
   # echo "deallocd"
   deallocAligned(cast[pointer](n), NODEALIGN.int)
 
-
-proc allocNode*(): NodePtr =     # Is this for some reason better if template?
+proc allocNode*(): NodePtr =
   # echo "allocd"
-  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
-  res[] = Node()
-  result = res.toNodePtr()
+  result = cast[NodePtr](allocAligned0(sizeof(Node), NODEALIGN.int))
+  cast[ptr Node](result)[] = Node()
 
 proc allocNode*[T](el: T): NodePtr =
   # echo "allocd"
-  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
-  res[] = Node()
-  res[].slots[0].store(el.prepareElement())
-  return res.toNodePtr()
-
-
+  result = allocNode()
+  cast[ptr Node](result)[].slots[0].store(prepareElement el)
 
 proc tryReclaim*(t: NodePtr, start: uint16) =
   # echo "trying to reclaim"
