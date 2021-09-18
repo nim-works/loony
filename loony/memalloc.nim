@@ -17,7 +17,7 @@ const
 
   MemAlign = # also minimal allocatable memory block
     when defined(useMalloc):
-      when defined(amd64): 16 
+      when defined(amd64): 16
       else: 8
     else: 16
 

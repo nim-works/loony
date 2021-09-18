@@ -1,11 +1,11 @@
 import std/atomics
-import "."/[constants, controlblock, alias, memalloc]
-# Import the holy one
-import pkg/cps
+
+import loony/spec
+import loony/memalloc
 
 type
   Node* = object
-    slots* : array[0..N-1, Atomic[uint]]    # Pointers to object
+    slots* : array[0..N-1, Atomic[uint]]  # Pointers to object
     next*  : Atomic[NodePtr]              # NodePtr - successor node
     ctrl*  : ControlBlock                 # Control block for mem recl
 
@@ -26,47 +26,49 @@ proc prepareElement*[T](el: T): uint =
   GC_ref(el)
   return (cast[uint](el) or WRITER)  # BIT or
 
-template fetchNext*(node: Node): NodePtr = node.next.load()
+template fetchNext*(node: Node): NodePtr =
+  node.next.load()
+
 template fetchNext*(node: NodePtr): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
   (toNode node).next.load()
 
-template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint = t.slots[idx].fetchAdd(w)
+template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint =
+  t.slots[idx].fetchAdd(w)
+
 template fetchAddSlot*(t: NodePtr, idx: uint16, w: uint): uint =
   (toNode t).slots[idx].fetchAdd(w)
-# Fetches the pointer to the object in the slot while atomically increasing the val
-# 
+
+# Fetches the pointer to the object in the slot while atomically
+# increasing the val
+#
 # Remembering that the pointer has 3 tail bits clear; these are reserved
 # and increased atomically do indicate RESUME, READER, WRITER statuship.
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
   t.next.compareExchange(expect, swap)
+
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
-  (toNode t).next.compareExchange(expect, swap) # Dumb, this needs to have expect be variable
+  # Dumb, this needs to have expect be variable
+  (toNode t).next.compareExchange(expect, swap)
 
 template deallocNode*(n: var Node) =
   # echo "deallocd"
   deallocAligned(n.addr, NODEALIGN.int)
-  
+
 template deallocNode*(n: NodePtr) =
   # echo "deallocd"
   deallocAligned(cast[pointer](n), NODEALIGN.int)
 
-
-proc allocNode*(): NodePtr =     # Is this for some reason better if template?
+proc allocNode*(): NodePtr =
   # echo "allocd"
-  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
-  res[] = Node()
-  result = res.toNodePtr()
+  result = cast[NodePtr](allocAligned0(sizeof(Node), NODEALIGN.int))
+  cast[ptr Node](result)[] = Node()
 
 proc allocNode*[T](el: T): NodePtr =
   # echo "allocd"
-  var res = cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
-  res[] = Node()
-  res[].slots[0].store(el.prepareElement())
-  return res.toNodePtr()
-
-
+  result = allocNode()
+  cast[ptr Node](result)[].slots[0].store(prepareElement el)
 
 proc tryReclaim*(t: NodePtr, start: uint16) =
   # echo "trying to reclaim"
@@ -119,8 +121,10 @@ proc incrDeqCount*(t: NodePtr, final: uint16 = 0) =
   #   echo "finalcount != 0, vals ", finalCount, " ", currCount
   # echo "Finalcount & currCount, vals ", finalCount, " ", currCount
   if currCount == finalCount:
-    var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)   # The article ommits the deq
+    var prev = t.toNode().ctrl.fetchAddReclaim(DEQ)
+    # The article omits the deq algorithm but I'm guessing i swap these
+    # vals to DEQ and ENQ
     # echo "IncrDEQCount prev ", prev
     # echo "IncrDEQCount new ", t.toNode().ctrl.reclaim.load()
-    if prev == (ENQ or SLOT):                         # algorithm but I'm guessing i
-      deallocNode(t)                                  # swap these vals to DEQ and ENQ
+    if prev == (ENQ or SLOT):
+      deallocNode(t)
