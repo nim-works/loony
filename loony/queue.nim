@@ -1,13 +1,11 @@
 import std/atomics
 import "."/[alias, constants, controlblock, node]
-# Import the holy one
-import pkg/cps
 
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
 # raise Defect(nil) | salt bae of defects
-# raise Defect(nil) | 
-# raise Defect(nil) | I am defect bae 
+# raise Defect(nil) |
+# raise Defect(nil) | I am defect bae
 # raise Defect(nil) |
 # and one more for haxscrampers pleasure
 # raise Defect(nil)
@@ -71,16 +69,16 @@ template fetchIncHead(queue: var LoonyQueue): TagPtr =
 
 template compareAndSwapTail(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
-  
+
 template compareAndSwapHead(queue: var LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-## Both enqueue and dequeue enter FAST PATH operations 99% of the time,   
-## however in cases we enter the SLOW PATH operations represented in both 
-## enq and deq by advTail and advHead respectively.                       
+## Both enqueue and dequeue enter FAST PATH operations 99% of the time,
+## however in cases we enter the SLOW PATH operations represented in both
+## enq and deq by advTail and advHead respectively.
 ##
-## This path requires the threads to first help updating the linked list  
-## struct before retrying and entering the fast path in the next attempt. 
+## This path requires the threads to first help updating the linked list
+## struct before retrying and entering the fast path in the next attempt.
 
 proc advTail[T](queue: var LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
@@ -177,7 +175,7 @@ proc push*[T](queue: var LoonyQueue[T], el: T) =
     if likely(tag.idx < N):
       ## We begin by tagging the pointer for el with a WRITER
       ## bit and then perform a FAA.
-      var w   : uint = prepareElement(el) 
+      var w   : uint = prepareElement(el)
       let prev: uint = fetchAddSlot(tag.nptr, tag.idx, w)
       if prev > 0:
         debugEcho "FAST PATH PUSH encountered pre-filled slot"
@@ -201,7 +199,7 @@ proc push*[T](queue: var LoonyQueue[T], el: T) =
         ## on the same node.
         tryReclaim(tag.nptr, tag.idx + 1)
 
-      ## Should the case above occur or we detect that the slot has been  
+      ## Should the case above occur or we detect that the slot has been
       ## filled by some gypsy magic then we will retry on the next goround.
 
     else:
@@ -225,8 +223,8 @@ proc isEmpty*(queue: var LoonyQueue): bool =
 
 proc pop*[T](queue: var LoonyQueue[T]): T =
   while true:
-    ## Before incrementing the dequeue index, an initial check must be    
-    ## performed to determine if the queue is empty.                      
+    ## Before incrementing the dequeue index, an initial check must be
+    ## performed to determine if the queue is empty.
     ## Ensure head is loaded last to keep mem hot
     var (tail, curr) = tailAndMane queue
     if isEmptyImpl(curr, tail):
@@ -257,22 +255,22 @@ proc pop*[T](queue: var LoonyQueue[T]): T =
       of QueueEmpty:
         break           # big oof
 
-## Consumed slots have been written to and then read. If a concurrent     
-## deque operation outpaces the corresponding enqueue operation then both 
-## operations have to abandon and try again. Once all slots in the node   
-## have been consumed or abandoned, the node is considered drained and    
-## unlinked from the list. Node can be reclaimed and de-allocated.        
+## Consumed slots have been written to and then read. If a concurrent
+## deque operation outpaces the corresponding enqueue operation then both
+## operations have to abandon and try again. Once all slots in the node
+## have been consumed or abandoned, the node is considered drained and
+## unlinked from the list. Node can be reclaimed and de-allocated.
 ##
-## Queue manages an enqueue index and a dequeue index. Each are modified  
-## by fetchAndAdd; gives thread reserves previous index for itself which  
-## may be used to address a slot in the respective nodes array.           
+## Queue manages an enqueue index and a dequeue index. Each are modified
+## by fetchAndAdd; gives thread reserves previous index for itself which
+## may be used to address a slot in the respective nodes array.
 ##
-## ANCHOR both node pointers are tagged with their assoc index value ->   
-## they store both address to respective node as well as the current      
-## index value in the same memory word.                                   
+## ANCHOR both node pointers are tagged with their assoc index value ->
+## they store both address to respective node as well as the current
+## index value in the same memory word.
 ##
-## Requires a sufficient number of available bits that are not used to    
-## present the nodes addresses themselves.                                
+## Requires a sufficient number of available bits that are not used to
+## present the nodes addresses themselves.
 
 proc initLoonyQueue*(q: var LoonyQueue) =
   ## Initialize an existing LoonyQueue.
