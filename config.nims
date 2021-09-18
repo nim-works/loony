@@ -1,6 +1,5 @@
 switch("threads", "on")
 switch("threadAnalysis", "off")
-switch("panics", "on")
 switch("define", "nimAllocStats")
 
 # make system.delete strict for index out of bounds accesses.
