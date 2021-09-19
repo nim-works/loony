@@ -1,4 +1,4 @@
-version = "0.0.1"
+version = "0.1.0"
 author = "cabboose"
 description = "fast mpmc queue with sympathetic memory behavior"
 license = "MIT"
