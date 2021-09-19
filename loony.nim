@@ -89,38 +89,34 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 
 proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
-  var null = 0'u
+
   while true:
     var tail = queue.fetchTail
     if t != tail.nptr:
       incrEnqCount t.toNode
       result = AdvOnly
       break
+
+    template tailSwapper(with: uint): untyped {.dirty.} =
+      while not queue.compareAndSwapTail(tail, with + 1):
+        if t != tail.nptr:
+          incrEnqCount t.toNode
+          break
+      incrEnqCount(t.toNode, tail.idx - (N-1))
+
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
       var node = cast[uint](allocNode el)
-      null = 0'u
+      var null = 0'u
       if t.compareAndSwapNext(null, node):
         result = AdvAndInserted
-        null = 0'u
-        var tag: TagPtr = node + 1  # Translates to (nptr: node, idx: 1)
-        while not queue.compareAndSwapTail(tail, tag): # T11
-          if t != tail.nptr:
-            incrEnqCount t.toNode
-            break
-        incrEnqCount(t.toNode, tail.idx - (N-1))
+        tailSwapper(node)
         break
       else:
         `=destroy`(cast[ptr Node](node)[])
     else: # T20
       result = AdvOnly
-      null = 0'u
-      # next+1 translates to (nptr: next, idx: 1)
-      while not queue.compareAndSwapTail(tail, next+1):
-        if t != tail.nptr:
-          incrEnqCount t.toNode
-          break
-      incrEnqCount(t.toNode, tail.idx - (N-1))
+      tailSwapper(next)
       break
 
 proc advHead(queue: LoonyQueue; curr: var TagPtr;
