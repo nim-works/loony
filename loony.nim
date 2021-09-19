@@ -49,13 +49,13 @@ proc fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
-template fetchTail(queue: LoonyQueue): TagPtr =
+template fetchTail(queue: LoonyQueue, order: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
-  TagPtr(load queue.tail)
+  TagPtr(load(queue.tail, order))
 
 template fetchHead(queue: LoonyQueue): TagPtr =
   ## get the TagPtr of the head (nptr: NodePtr, idx: uint16)
-  TagPtr(load queue.head)
+  TagPtr(load(queue.head, order))
 
 template maneAndTail(queue: LoonyQueue): (TagPtr, TagPtr) =
   (fetchHead queue, fetchTail queue)
@@ -64,15 +64,15 @@ template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
 
 template fetchCurrTail(queue: LoonyQueue): NodePtr =
   ## get the NodePtr of the current tail
-  cast[NodePtr](load queue.currTail)
+  cast[NodePtr](load(queue.currTail, moRelaxed))
 
-template fetchIncTail(queue: LoonyQueue): TagPtr =
+template fetchIncTail(queue: LoonyQueue, order: MemoryOrder = moAcquire): TagPtr =
   ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
-  cast[TagPtr](queue.tail.fetchAdd(1))
+  cast[TagPtr](queue.tail.fetchAdd(1, order))
 
-template fetchIncHead(queue: LoonyQueue): TagPtr =
+template fetchIncHead(queue: LoonyQueue, order: MemoryOrder = moAcquire): TagPtr =
   ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
-  cast[TagPtr](queue.head.fetchAdd(1))
+  cast[TagPtr](queue.head.fetchAdd(1, order))
 
 template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
