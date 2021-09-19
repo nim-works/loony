@@ -121,6 +121,9 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
 
 proc advHead(queue: LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
+  when false:                     # we can't decide if this matters 😏
+    if h.idx == N-1:
+      tryReclaim(h.toNode, 0'u8)  # As done in cpp impl
   var next = fetchNext h
   result =
     if cast[ptr Node](next).isNil() or (t == h):
