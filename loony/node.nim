@@ -45,11 +45,11 @@ template fetchAddSlot*(t: Node, idx: uint16, w: uint): uint =
   t.slots[idx].fetchAdd(w)
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
-  t.next.compareExchange(expect, swap)
+  t.next.compareExchange(expect, swap, moRelaxed) # Have changed to relaxed as per cpp impl
 
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
   # Dumb, this needs to have expect be variable
-  (toNode t).next.compareExchange(expect, swap)
+  (toNode t).next.compareExchange(expect, swap, moRelaxed) # Have changed to relaxed as per cpp impl
 
 proc `=destroy`*(n: var Node) =
   # echo "deallocd"
