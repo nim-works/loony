@@ -50,27 +50,14 @@ proc getHigh*(mask: ControlMask): uint16 =
 proc getLow*(mask: ControlMask): uint16 =
   mask.uint16
 
-proc fetchAddHigh*(mask: var Atomic[ControlMask]): uint16 =
-  (mask.fetchAdd(1 shl SHIFT) shr SHIFT).uint16
+proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = moAcquire): ControlMask =
+  ctrl.tailMask.fetchAdd(v, order)
 
-proc fetchAddLow*(mask: var Atomic[ControlMask]): uint16 =
-  mask.fetchAdd(1).uint16
-
-proc fetchAddMask*(mask: var Atomic[ControlMask], pos: int, val: uint32): ControlMask =
-  mask.fetchAdd:
-    if pos > 0:
-      val shl SHIFT
-    else:
-      val
-
-proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1): ControlMask =
-  ctrl.tailMask.fetchAdd(v)
-
-proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1): ControlMask =
-  ctrl.headMask.fetchAdd(v)
+proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = moAcquire): ControlMask =
+  ctrl.headMask.fetchAdd(v, order)
 
 proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1): uint8 =
-  ctrl.reclaim.fetchAdd(v)
+  ctrl.reclaim.fetchAdd(v, order = moAcquireRelease)
 
 when defined(loonyDebug):
   import std/logging

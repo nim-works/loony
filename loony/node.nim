@@ -70,8 +70,8 @@ proc tryReclaim*(node: var Node; start: uint16) =
     for i in start .. N:
       template s: Atomic[uint] = node.slots[i]
       # echo "Slot current val ", s.load()
-      if (s.load() and CONSUMED) != CONSUMED:
-        var prev = s.fetchAdd(RESUME) and CONSUMED
+      if (s.load(order = moAcquire) and CONSUMED) != CONSUMED:
+        var prev = s.fetchAdd(RESUME, order = moRelaxed) and CONSUMED
         # echo prev
         if prev != CONSUMED:
           break done
