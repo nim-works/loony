@@ -23,8 +23,8 @@ template toUInt*(nodeptr: ptr Node): uint =
   cast[uint](nodeptr)
 
 proc prepareElement*[T: ref](el: T): uint =
-  ## Take an item into the queue; we bump the RC first to ensure
-  ## that no other operations free it, then add the WRITER bit.
+  ## Prepare an item to be taken into the queue; we bump the RC first to
+  ## ensure that no other operations free it, then add the WRITER bit.
   GC_ref el
   result = cast[uint](el) or WRITER
 
