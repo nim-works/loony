@@ -1,25 +1,85 @@
 # Loony
+[![Test Matrix](https://github.com/disruptek/cps/workflows/CI/badge.svg)](https://github.com/shayanhabibi/loony/actions?query=workflow%3ACI)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/shayanhabibi/loony?style=flat)](https://github.com/shayanhabibi/loony/releases/latest)
+![Minimum supported Nim version](https://img.shields.io/badge/nim-1.5.1%2B-informational?style=flat&logo=nim)
+[![License](https://img.shields.io/github/license/shayanhabibi/loony?style=flat)](#license)
 
-This is just my attempt to do the base translation of the algorithm from ["Fast
-and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation" by
-Giersch & Nolte](papers/GierschEtAl.pdf).
+>*"Don't let me block you" - Araq*
+>
+>*"We didn't have a good story about migrating continuations between threads." - Disruptek*
 
-I originally just wanted a high throughput MPMC queue for
-[CPS](https://github.com/disruptek/cps) since that is already such a great
-avenue for concurrency. disruptek thinks it is worth recreating. This
-experiment will be handed off to the cps team when most of the basic rubbish is
-done and tested.
+Have you ever asked yourself what would a lock-free MPMC queue look like in nim?
 
-- [Benchmarks](https://github.com/oliver-giersch/lfqueue-benchmarks/tree/master/lib)
-- [c++ impl](https://github.com/oliver-giersch/looqueue/tree/master)
-- [Algorithms](https://github.com/oliver-giersch/looqueue/blob/master/ALGORITHMS.md)
+What about a lock-free MPMC queue designed on an algorithm built for speed and memory safety?
 
----
+What about that algorithm implemented by some ***loonatics***?
+
+Enter **Loony**
+
+>*"C'mon man... 24,000 threads and 500,000,000 continuations... which are written in "normal" nim." - Disruptek*
+>
+>*"OK, time to get my monies worth from all my cores" - saem*
+>
+>*"My eyes are bleeding" - cabboose*
+
+## About
+
+Loony is a 100% Nim-lang implementation of the algorithm depicted by Giersch & Nolte in ["Fast
+and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation"](papers/GierschEtAl.pdf).
+
+The algorithm was chosen to help progress the concurrency story of [CPS](https://github.com/disruptek/cps) for which this was bespokingly made.
+
+After adapting the algorithm to nim CPS, disruptek adapted the queue for **any ref object** and was instrumental in ironing out the bugs and improving the performance of Loony.
+
+## What can it do
+
+- Lock-free consumption by up to **32,255** threads
+- Lock-free production by up to **64,610** threads
+- Memory-leak free under **ARC**
+- Can pass ANY ref object between threads; however:
+  - Is perfectly designed for passing Continuations between threads
+
+## Issues
+
+**Loony queue only works on ARC**.
+
+ORC is not supported (See [Issue #4](https://github.com/shayanhabibi/loony/issues/4))
+
+## Installation
+
+Download with `nimble install loony` (CPS dependency for tests) or directly from the source.
+
+### How to use
+
+Simple:
+
+```nim
+import pkg/loony
+
+type AnyRefObject = ref object
+
+var loonyQueue = initLoonyQueue[AnyRefObject]
+# loony queue is a ref object itself
+
+var aro = new AnyRefObject
+
+loonyQueue.push aro
+# Enqueue objects onto the queue
+
+var el = loonyQueue.pop
+# Dequeue objects from the queue
+```
+
+Not much else to it!
+
+## Benchmarks
+
+TBD
 
 ## Current State
 
-Doesn't seem to work with ORC. The last `=destroy` called on any ref object in
-another thread causes a crash. However with ARC, there is no such issue and the
-allocCount and deallocCount matches perfectly on my abstract tests. So far I
-consider this to be functional at its core with stress testing to follow up and
-then performance benchmarking.
+*"It works" - Disruptek*
+
+## What are Continuations?
+
+If you've somehow missed the next big thing for nim; see [CPS](https://github.com/disruptek/cps)
