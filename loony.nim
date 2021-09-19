@@ -108,7 +108,7 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
             if t != tail.nptr:
               incrEnqCount t.toNode
               break done
-          incrEnqCount(t.toNode, tail.idx - N)
+          incrEnqCount(t.toNode, tail.idx - (N-1))
         result = AdvAndInserted
         break
       else:
