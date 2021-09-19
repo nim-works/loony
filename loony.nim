@@ -102,7 +102,7 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
         if t != tail.nptr:
           incrEnqCount t.toNode
           break
-      incrEnqCount(t.toNode, tail.idx - (N-1))
+      incrEnqCount(t.toNode, tail.idx - N)
 
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
@@ -122,7 +122,7 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
 proc advHead(queue: LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
   when false:                     # we can't decide if this matters 😏
-    if h.idx == N-1:
+    if h.idx == N:
       tryReclaim(h.toNode, 0'u8)  # As done in cpp impl
   var next = fetchNext h
   result =
@@ -138,7 +138,7 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
           if curr.nptr != h:
             incrDeqCount h.toNode
             break done
-        incrDeqCount(h.toNode, curr.idx - (N-1))
+        incrDeqCount(h.toNode, curr.idx - N)
       Advanced
 
 ## Fundamentally, both enqueue and dequeue operations attempt to
@@ -241,7 +241,7 @@ proc pop*[T](queue: LoonyQueue[T]): T =
       if not unlikely((prev and SLOTMASK) == 0):
         # This operation makes no sense to me and it
         # wasn't in the cpp imp so I killed it
-        if false and head.idx == N-1:
+        if false and head.idx == N:
           # why do we abandon the last index?
           # do we do the same for the push?
           tryReclaim(head.node, 0'u8)
@@ -284,7 +284,7 @@ proc initLoonyQueue*(q: LoonyQueue) =
   q.head.store headTag
   q.tail.store tailTag
   q.currTail.store tailTag
-  for i in 0..<N:
+  for i in 0..N:
     var h = load headTag.toNode().slots[i]
     var t = load tailTag.toNode().slots[i]
     assert h == 0, "Slot found to not be nil on initialisation"

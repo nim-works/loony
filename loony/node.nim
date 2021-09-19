@@ -5,7 +5,7 @@ import loony/memalloc
 
 type
   Node* = object
-    slots* : array[0..N-1, Atomic[uint]]  # Pointers to object
+    slots* : array[0..N, Atomic[uint]]  # Pointers to object
     next*  : Atomic[NodePtr]              # NodePtr - successor node
     ctrl*  : ControlBlock                 # Control block for mem recl
 
@@ -67,7 +67,7 @@ proc allocNode*[T](el: T): ptr Node =
 proc tryReclaim*(node: var Node; start: uint16) =
   # echo "trying to reclaim"
   block done:
-    for i in start ..< N:
+    for i in start .. N:
       template s: Atomic[uint] = node.slots[i]
       # echo "Slot current val ", s.load()
       if (s.load() and CONSUMED) != CONSUMED:

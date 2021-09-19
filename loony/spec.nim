@@ -12,7 +12,8 @@ const
   DEQ*      =   uint8(1 shl 1) # 0000_0010
   ENQ*      =   uint8(1 shl 2) # 0000_0100
   #
-  N*        =         1024     # Number of slots per node in the queue
+  NUMSLOTS*        =         1024     # Number of slots per node in the queue
+  N*        =         NUMSLOTS - 1     # Number of slots per node in the queue
   #
   TAGBITS*   : uint = 11             # Each node must be aligned to this value
   NODEALIGN* : uint = 1 shl TAGBITS  # in order to store the required number of
