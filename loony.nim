@@ -98,7 +98,7 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
       break
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
-      var node: uint = cast[uint](allocNode el)
+      var node = cast[uint](allocNode el)
       null = 0'u
       if t.compareAndSwapNext(null, node):
         null = 0'u

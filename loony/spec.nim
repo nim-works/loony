@@ -44,16 +44,16 @@ type
     reclaim*  : Atomic[uint8]     #                   1 byte
 
 proc getHigh*(mask: ControlMask): uint16 =
-  cast[uint16](mask shr SHIFT)
+  (mask shr SHIFT).uint16
 
 proc getLow*(mask: ControlMask): uint16 =
-  cast[uint16](mask)
+  mask.uint16
 
 proc fetchAddHigh*(mask: var Atomic[ControlMask]): uint16 =
-  cast[uint16]((mask.fetchAdd(1 shl SHIFT)) shr SHIFT)
+  (mask.fetchAdd(1 shl SHIFT) shr SHIFT).uint16
 
 proc fetchAddLow*(mask: var Atomic[ControlMask]): uint16 =
-  cast[uint16](mask.fetchAdd(1))
+  mask.fetchAdd(1).uint16
 
 proc fetchAddMask*(mask: var Atomic[ControlMask], pos: int, val: uint32): ControlMask =
   mask.fetchAdd:

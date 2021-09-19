@@ -81,45 +81,27 @@ proc tryReclaim*(node: var Node; start: uint16) =
       `=destroy` node
 
 proc incrEnqCount*(node: var Node; final: uint16 = 0) =
-  var finalCount: uint16 = final
-  var mask: ControlMask
-  var currCount: uint16
-  if finalCount == 0:
-    mask = node.ctrl.fetchAddTail(1)
-    finalCount = mask.getHigh()
-    currCount = cast[uint16](1 + (mask and MASK))
-  else:
-    var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
-    mask = node.ctrl.fetchAddTail(v)
-    currCount = cast[uint16](1 + (mask and MASK))
-  if currCount == finalCount:
-    var prev = node.ctrl.fetchAddReclaim(ENQ)
-    # echo "IncrEnqCount prev ", prev
-    # echo "IncrEnqCount new ", t.toNode().ctrl.reclaim.load()
-    if prev == (DEQ or SLOT):
+  var mask =
+    node.ctrl.fetchAddTail:
+      (final.uint32 shl 16) + 1
+  template finalCount: uint16 =
+    if final == 0:
+      getHigh mask
+    else:
+      final
+  if finalCount == (mask.uint16 and MASK) + 1:
+    if node.ctrl.fetchAddReclaim(ENQ) == (DEQ or SLOT):
       `=destroy` node
 
 proc incrDeqCount*(node: var Node; final: uint16 = 0) =
-  var finalCount: uint16 = final
-  var mask: ControlMask
-  var currCount: uint16
-  # echo "Incrementing deq count"
-  if finalCount == 0:
-    mask = node.ctrl.fetchAddTail(1)
-    finalCount = mask.getHigh()
-    currCount = cast[uint16](1 + (mask and MASK))
-    # echo "If finalcount == 0, vals ", finalCount, " ", currCount
-  else:
-    var v: uint32 = 1 + (cast[uint32](finalCount) shl 16)
-    mask = node.ctrl.fetchAddTail(v)
-    currCount = cast[uint16](1 + (mask and MASK))
-  #   echo "finalcount != 0, vals ", finalCount, " ", currCount
-  # echo "Finalcount & currCount, vals ", finalCount, " ", currCount
-  if currCount == finalCount:
-    var prev = node.ctrl.fetchAddReclaim(DEQ)
-    # The article omits the deq algorithm but I'm guessing i swap these
-    # vals to DEQ and ENQ
-    # echo "IncrDEQCount prev ", prev
-    # echo "IncrDEQCount new ", t.toNode().ctrl.reclaim.load()
-    if prev == (ENQ or SLOT):
+  var mask =
+    node.ctrl.fetchAddTail:
+      (final.uint32 shl 16) + 1
+  template finalCount: uint16 =
+    if final == 0:
+      getHigh mask
+    else:
+      final
+  if finalCount == (mask.uint16 and MASK) + 1:
+    if node.ctrl.fetchAddReclaim(DEQ) == (ENQ or SLOT):
       `=destroy` node
