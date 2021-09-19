@@ -50,14 +50,14 @@ proc getHigh*(mask: ControlMask): uint16 =
 proc getLow*(mask: ControlMask): uint16 =
   mask.uint16
 
-proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = moAcquire): ControlMask =
-  ctrl.tailMask.fetchAdd(v, order = order)
+proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moAcquire): ControlMask =
+  ctrl.tailMask.fetchAdd(v, order = moorder)
 
-proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = moAcquire): ControlMask =
-  ctrl.headMask.fetchAdd(v, order = order)
+proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moAcquire): ControlMask =
+  ctrl.headMask.fetchAdd(v, order = moorder)
 
-proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, order: MemoryOrder = moAcquireRelease): uint8 =
-  ctrl.reclaim.fetchAdd(v, order = order)
+proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, moorder: MemoryOrder = moAcquireRelease): uint8 =
+  ctrl.reclaim.fetchAdd(v, order = moorder)
 
 when defined(loonyDebug):
   import std/logging

@@ -28,21 +28,21 @@ proc prepareElement*[T: ref](el: T): uint =
   GC_ref el
   result = cast[uint](el) or WRITER
 
-template fetchNext*(node: Node, order: MemoryOrder = moAcquireRelease): NodePtr =
-  node.next.load(order = order)
+template fetchNext*(node: Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
+  node.next.load(order = moorder)
 
-template fetchNext*(node: NodePtr, order: MemoryOrder = moAcquireRelease): NodePtr =
+template fetchNext*(node: NodePtr, moorder: MemoryOrder = moAcquireRelease): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
-  (toNode node).next.load(order = order)
+  (toNode node).next.load(order = moorder)
 
-template fetchAddSlot*(t: Node, idx: uint16, w: uint, order: MemoryOrder = moAcquireRelease): uint =
+template fetchAddSlot*(t: Node, idx: uint16, w: uint, moorder: MemoryOrder = moAcquireRelease): uint =
   ## Fetches the pointer to the object in the slot while atomically
   ## increasing the value by `w`.
   ##
   ## Remembering that the pointer has 3 tail bits clear; these are
   ## reserved and increased atomically to indicate RESUME, READER, WRITER
   ## statuship.
-  t.slots[idx].fetchAdd(w, order = order)
+  t.slots[idx].fetchAdd(w, order = moorder)
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
   t.next.compareExchange(expect, swap, moRelaxed) # Have changed to relaxed as per cpp impl
