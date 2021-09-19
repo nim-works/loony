@@ -56,8 +56,8 @@ proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = m
 proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, order: MemoryOrder = moAcquire): ControlMask =
   ctrl.headMask.fetchAdd(v, order)
 
-proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1): uint8 =
-  ctrl.reclaim.fetchAdd(v, order = moAcquireRelease)
+proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, order: MemoryOrder = moAcquireRelease): uint8 =
+  ctrl.reclaim.fetchAdd(v, order)
 
 when defined(loonyDebug):
   import std/logging
