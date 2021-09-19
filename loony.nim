@@ -70,7 +70,7 @@ template fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagP
   ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.tail.fetchAdd(1, order = moorder))
 
-template fetchIncHead(queue: LoonyQueue, order: MemoryOrder = moAcquire): TagPtr =
+template fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
