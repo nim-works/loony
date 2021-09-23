@@ -24,6 +24,9 @@ Enter **Loony**
 
 ## About
 
+> A massive thank you to the author Oliver Giersch who proposed this algorithm and for being so kind as to have a look at our implementation and review it! We wish nothing but the best for the soon to be Dr Giersch.
+
+
 Loony is a 100% Nim-lang implementation of the algorithm depicted by Giersch & Nolte in ["Fast
 and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation"](papers/GierschEtAl.pdf).
 
@@ -33,11 +36,17 @@ After adapting the algorithm to nim CPS, disruptek adapted the queue for **any r
 
 ## What can it do
 
-- Lock-free consumption by up to **32,255** threads
-- Lock-free production by up to **64,610** threads
+> While the following is possible; this is only by increasing the alignment our 'node' pointers to 16 which would invariably effect performance.
+>- Lock-free consumption by up to **32,255** threads
+>- Lock-free production by up to **64,610** threads
+
+With the 11 bit aligned implementation we have:
+- Lock-free consumption up to **512** threads
+- Lock-free production up to **1,025** threads
 - Memory-leak free under **ARC**
 - Can pass ANY ref object between threads; however:
   - Is perfectly designed for passing Continuations between threads
+  - :warning: Memory safety is up to the user, data races accessing memory associated with the reference are not prevented (*currently :wink:*)
 
 ## Issues
 

@@ -121,9 +121,9 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
 
 proc advHead(queue: LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
-  when false:                     # we can't decide if this matters 😏
-    if h.idx == N:
-      tryReclaim(h.toNode, 0'u8)  # As done in cpp impl
+  #when false:                     # we can't decide if this matters 😏
+  if h.idx == N:
+    tryReclaim(h.toNode, 0'u8)  # Yes it matters you monster
   var next = fetchNext h
   result =
     if cast[ptr Node](next).isNil() or (t == h):
@@ -239,20 +239,13 @@ proc pop*[T](queue: LoonyQueue[T]): T =
       # must contain a valid pointer to an enqueued element
       # that can be returned (see enqueue)
       if not unlikely((prev and SLOTMASK) == 0):
-        # This operation makes no sense to me and it
-        # wasn't in the cpp imp so I killed it
-        if false and head.idx == N:
-          # why do we abandon the last index?
-          # do we do the same for the push?
-          tryReclaim(head.node, 0'u8)
-        else:
-          if (prev and spec.WRITER) != 0:
-            if unlikely((prev and RESUME) != 0):
-              tryReclaim(head.node, head.idx + 1)
-            result = cast[T](prev and SLOTMASK)
-            assert result != nil
-            GC_unref result
-            break
+        if (prev and spec.WRITER) != 0:
+          if unlikely((prev and RESUME) != 0):
+            tryReclaim(head.node, head.idx + 1)
+          result = cast[T](prev and SLOTMASK)
+          assert result != nil
+          GC_unref result
+          break
     else:
       case queue.advHead(curr, head.nptr, tail.nptr)
       of Advanced:
