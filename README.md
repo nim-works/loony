@@ -60,7 +60,11 @@ Download with `nimble install loony` (CPS dependency for tests) or directly from
 
 ### How to use
 
-Simple:
+Simple.
+
+First, ensure you compile with arc and threads (`--gc:arc --threads:on`); the atomic operations will not be available from the main lib otherwise.
+
+Then:
 
 ```nim
 import pkg/loony
