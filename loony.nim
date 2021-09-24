@@ -66,13 +66,17 @@ template fetchCurrTail(queue: LoonyQueue): NodePtr =
   ## get the NodePtr of the current tail
   cast[NodePtr](load(queue.currTail, moRelaxed))
 
-template fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+# Bug #11 - Using these as templates would cause errors unless the end user
+# imported std/atomics or we export atomics.
+# For the sake of not polluting the users namespace I have changed these into procs.
+proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.tail.fetchAdd(1, order = moorder))
 
-template fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
+
 
 template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
@@ -193,7 +197,7 @@ proc push*[T](queue: LoonyQueue[T], el: T) =
         ## the memory reclamation mechanism and is only relevant
         ## in rare edge cases in which the enqueue operation
         ## is significantly delayed and lags behind most other operations
-        ## on the same node.
+        ## on the same node.proc
         tryReclaim(tag.node, tag.idx + 1)
       else:
         ## Should the case above occur or we detect that the slot has been
