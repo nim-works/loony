@@ -1,3 +1,8 @@
+## This contains the LoonyQueue object and associated push/pop operations.
+## 
+## There is a detailed explanation of the algorithm operation within the src
+## files if you are having issues or want to contribute.
+
 import std/atomics
 
 import loony/spec
@@ -27,15 +32,15 @@ type
     QueueEmpty      # 0000_0000
     Advanced        # 0000_0001
 
-## TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of
-## the tail to contain the index of the slot to its corresponding node
-## by aligning the node pointers on allocation. Since the index value is
-## stored in the same memory word as its associated node pointer, the FAA
-## operations could potentially affect both values if too many increments
-## were to occur. This is accounted for in the algorithm and with space
-## for overflow in the alignment. See Section 5.2 for the paper to see
-## why an overflow would prove impossible except under extraordinarily
-## large number of thread contention.
+# TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of
+# the tail to contain the index of the slot to its corresponding node
+# by aligning the node pointers on allocation. Since the index value is
+# stored in the same memory word as its associated node pointer, the FAA
+# operations could potentially affect both values if too many increments
+# were to occur. This is accounted for in the algorithm and with space
+# for overflow in the alignment. See Section 5.2 for the paper to see
+# why an overflow would prove impossible except under extraordinarily
+# large number of thread contention.
 
 proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
 proc node(tag: TagPtr): var Node = cast[ptr Node](tag.nptr)[]
@@ -84,12 +89,12 @@ template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-## Both enqueue and dequeue enter FAST PATH operations 99% of the time,
-## however in cases we enter the SLOW PATH operations represented in both
-## enq and deq by advTail and advHead respectively.
-##
-## This path requires the threads to first help updating the linked list
-## struct before retrying and entering the fast path in the next attempt.
+# Both enqueue and dequeue enter FAST PATH operations 99% of the time,
+# however in cases we enter the SLOW PATH operations represented in both
+# enq and deq by advTail and advHead respectively.
+#
+# This path requires the threads to first help updating the linked list
+# struct before retrying and entering the fast path in the next attempt.
 
 proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
@@ -145,34 +150,34 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
         incrDeqCount(h.toNode, curr.idx - N)
       Advanced
 
-## Fundamentally, both enqueue and dequeue operations attempt to
-## exclusively reserve access to a slot in the array of their associated
-## queue node by automatically incremementing the appropriate index value
-## and retrieving the previous value of the index as well as the current
-## node pointer.
-##
-## Threads that retrieve an index i < N (length of the slots array) gain
-## *exclusive* rights to perform either write/consume operation on the
-## corresponding slot.
-##
-## This guarantees there can only be exactly one of each for any given
-## slot.
-##
-## Where i < N, we use FAST PATH operations. These operations are
-## designed to be as fast as possible while only dealing with memory
-## contention in rare edge cases.
-##
-## if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead
-## above.
-##
-## Fetch And Add (FAA) primitives are used for both incrementing index
-## values as well as performing read(consume) and write operations on
-## reserved slots which drastically improves scalability compared to
-## Compare And Swap (CAS) primitives.
-##
-## Note that all operations on slots must modify the slots state bits to
-## announce both operations completion (in case of a read) and also makes
-## determining the order in which two operations occured possible.
+# Fundamentally, both enqueue and dequeue operations attempt to
+# exclusively reserve access to a slot in the array of their associated
+# queue node by automatically incremementing the appropriate index value
+# and retrieving the previous value of the index as well as the current
+# node pointer.
+#
+# Threads that retrieve an index i < N (length of the slots array) gain
+# *exclusive* rights to perform either write/consume operation on the
+# corresponding slot.
+#
+# This guarantees there can only be exactly one of each for any given
+# slot.
+#
+# Where i < N, we use FAST PATH operations. These operations are
+# designed to be as fast as possible while only dealing with memory
+# contention in rare edge cases.
+#
+# if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead
+# above.
+#
+# Fetch And Add (FAA) primitives are used for both incrementing index
+# values as well as performing read(consume) and write operations on
+# reserved slots which drastically improves scalability compared to
+# Compare And Swap (CAS) primitives.
+#
+# Note that all operations on slots must modify the slots state bits to
+# announce both operations completion (in case of a read) and also makes
+# determining the order in which two operations occured possible.
 
 proc push*[T](queue: LoonyQueue[T], el: T) =
   while true:
@@ -193,15 +198,15 @@ proc push*[T](queue: LoonyQueue[T], el: T) =
       # early and we must consequently abandon the slot and retry.
 
       of RESUME or READER:
-        ## Checking for the presence of the RESUME bit only pertains to
-        ## the memory reclamation mechanism and is only relevant
-        ## in rare edge cases in which the enqueue operation
-        ## is significantly delayed and lags behind most other operations
-        ## on the same node.proc
+        # Checking for the presence of the RESUME bit only pertains to
+        # the memory reclamation mechanism and is only relevant
+        # in rare edge cases in which the enqueue operation
+        # is significantly delayed and lags behind most other operations
+        # on the same node.proc
         tryReclaim(tag.node, tag.idx + 1)
       else:
-        ## Should the case above occur or we detect that the slot has been
-        ## filled by some gypsy magic then we will retry on the next loop.
+        # Should the case above occur or we detect that the slot has been
+        # filled by some gypsy magic then we will retry on the next loop.
         discard
 
       # afaict, this is fine...
@@ -257,22 +262,22 @@ proc pop*[T](queue: LoonyQueue[T]): T =
       of QueueEmpty:
         break           # big oof
 
-## Consumed slots have been written to and then read. If a concurrent
-## deque operation outpaces the corresponding enqueue operation then both
-## operations have to abandon and try again. Once all slots in the node
-## have been consumed or abandoned, the node is considered drained and
-## unlinked from the list. Node can be reclaimed and de-allocated.
-##
-## Queue manages an enqueue index and a dequeue index. Each are modified
-## by fetchAndAdd; gives thread reserves previous index for itself which
-## may be used to address a slot in the respective nodes array.
-##
-## ANCHOR both node pointers are tagged with their assoc index value ->
-## they store both address to respective node as well as the current
-## index value in the same memory word.
-##
-## Requires a sufficient number of available bits that are not used to
-## present the nodes addresses themselves.
+# Consumed slots have been written to and then read. If a concurrent
+# deque operation outpaces the corresponding enqueue operation then both
+# operations have to abandon and try again. Once all slots in the node
+# have been consumed or abandoned, the node is considered drained and
+# unlinked from the list. Node can be reclaimed and de-allocated.
+#
+# Queue manages an enqueue index and a dequeue index. Each are modified
+# by fetchAndAdd; gives thread reserves previous index for itself which
+# may be used to address a slot in the respective nodes array.
+#
+# both node pointers are tagged with their assoc index value ->
+# they store both address to respective node as well as the current
+# index value in the same memory word.
+#
+# Requires a sufficient number of available bits that are not used to
+# present the nodes addresses themselves.
 
 proc initLoonyQueue*(q: LoonyQueue) =
   ## Initialize an existing LoonyQueue.
@@ -291,7 +296,6 @@ proc initLoonyQueue*(q: LoonyQueue) =
 
 proc initLoonyQueue*[T](): LoonyQueue[T] =
   ## Return an initialized LoonyQueue.
-  # So I should definitely have a destroy proc to clear the nodes but i
-  # do that later
+  # TODO destroy proc
   new result
   initLoonyQueue result
