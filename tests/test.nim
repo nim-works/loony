@@ -17,9 +17,6 @@ let
 
 type
   C = ref object of Continuation
-    q: LoonyQueue[Continuation]
-  ThreadArg = object
-    q: LoonyQueue[Continuation]
 
 addHandler newConsoleLogger()
 setLogFilter:
@@ -30,24 +27,20 @@ setLogFilter:
   else:
     lvlDebug
 
-proc dealloc(c: C; E: typedesc[C]): E =
-  checkpoint "reached dealloc"
+var q: LoonyQueue[Continuation]
 
-proc runThings(targ: ThreadArg) {.thread.} =
+proc runThings() {.thread.} =
   while true:
-    var job = pop targ.q
+    var job = pop q
     if job.dismissed:
       break
     else:
       while job.running:
         job = trampoline job
 
-proc pass(cFrom, cTo: C): C =
-  cTo.q = cFrom.q
-  return cTo
-
 proc enqueue(c: C): C {.cpsMagic.} =
-  c.q.push(c)
+  check not q.isNil
+  q.push(c)
 
 var counter {.global.}: Atomic[int]
 
@@ -87,47 +80,41 @@ template expectCounter(n: int): untyped =
     raise
 
 suite "loony":
-  var queue: LoonyQueue[Continuation]
-
   block:
     ## creation and initialization of the queue
 
     # Moment of truth
-    queue = initLoonyQueue[Continuation]()
+    q = initLoonyQueue[Continuation]()
 
   block:
     ## run some continuations through the queue in another thread
     when defined(danger): skip "boring"
-    var targ = ThreadArg(q: queue)
-    var thr: Thread[ThreadArg]
+    var thr: Thread[void]
 
     counter.store 0
     dumpAllocStats:
       for i in 0 ..< continuationCount:
         var c = whelp doContinualThings()
-        c.q = queue
         discard enqueue c
-      createThread(thr, runThings, targ)
+      createThread(thr, runThings)
       joinThread thr
       expectCounter continuationCount
 
   block:
     ## run some continuations through the queue in many threads
     when not defined(danger): skip "slow"
-    var targ = ThreadArg(q: queue)
-    var threads: seq[Thread[ThreadArg]]
-    threads.newSeq threadCount
+    var threads: seq[Thread[void]]
+    newSeq(threads, threadCount)
 
     counter.store 0
     dumpAllocStats:
       for i in 0 ..< continuationCount:
         var c = whelp doContinualThings()
-        c.q = queue
         discard enqueue c
       checkpoint "queued $# continuations" % [ $continuationCount ]
 
       for thread in threads.mitems:
-        createThread(thread, runThings, targ)
+        createThread(thread, runThings)
       checkpoint "created $# threads" % [ $threadCount ]
 
       for thread in threads.mitems:
