@@ -177,13 +177,15 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
 # announce both operations completion (in case of a read) and also makes
 # determining the order in which two operations occured possible.
 
-proc push*[T](queue: LoonyQueue[T], el: T) =
+template pushImpl[T](queue: LoonyQueue[T], el: T,
+                    forcedCoherance: bool = false) =
   # Begin by tagging pointer el with WRITER bit
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
   # primitive; it will be preferred while proving safety before working towards
   # optimisation by atomic reads/writes of cache lines related to el
-  atomicThreadFence(ATOMIC_RELEASE)
+  when forcedCoherance:
+    atomicThreadFence(ATOMIC_RELEASE)
   while true:
     # Enq proc begins with incr the index of node in TagPtr
     var tag = fetchIncTail(queue)
@@ -217,6 +219,13 @@ proc push*[T](queue: LoonyQueue[T], el: T) =
       of AdvOnly:
         discard
 
+  
+
+proc push*[T](queue: LoonyQueue[T], el: T) =
+  pushImpl(queue, el, forcedCoherance = true)
+proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+  pushImpl(queue, el, forcedCoherance = false)
+
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
   if head.idx >= N or head.idx >= tail.idx:
     result = head.nptr == tail.nptr
@@ -225,7 +234,7 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc pop*[T](queue: LoonyQueue[T]): T =
+template popImpl[T](queue: LoonyQueue[T]; forcedCoherance: bool = false): T =
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
@@ -248,7 +257,8 @@ proc pop*[T](queue: LoonyQueue[T]): T =
           # Ideally before retrieving the ref object itself, we want to allow
           # CPUs to communicate cache line changes and resolve invalidations
           # to dirty memory.
-          atomicThreadFence(ATOMIC_ACQUIRE)
+          when forcedCoherance:
+            atomicThreadFence(ATOMIC_ACQUIRE)
           # CPU halt and clear STOREBUFFER; overwritten cache lines will be
           # syncd and invalidated ensuring fresh memory from this point in line
           # with the PUSH operations atomicThreadFence(ATOMIC_RELEASE)
@@ -268,6 +278,11 @@ proc pop*[T](queue: LoonyQueue[T]): T =
         discard
       of QueueEmpty:
         break
+
+proc pop*[T](queue: LoonyQueue[T]): T =
+  popImpl(queue, forcedCoherance = true)
+proc unsafePop*[T](queue: LoonyQueue[T]): T =
+  popImpl(queue, forcedCoherance = false)
 
 # Consumed slots have been written to and then read. If a concurrent
 # deque operation outpaces the corresponding enqueue operation then both
