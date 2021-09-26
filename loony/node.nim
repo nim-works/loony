@@ -6,8 +6,8 @@ import loony/memalloc
 type
   Node* = object
     slots* : array[0..N, Atomic[uint]]  # Pointers to object
-    next*  : Atomic[NodePtr]              # NodePtr - successor node
-    ctrl*  : ControlBlock                 # Control block for mem recl
+    next*  : Atomic[NodePtr]            # NodePtr - successor node
+    ctrl*  : ControlBlock               # Control block for mem recl
 
 template toNodePtr*(pt: uint | ptr Node): NodePtr =
   # Convert ptr Node into NodePtr uint
@@ -45,38 +45,32 @@ template fetchAddSlot*(t: Node, idx: uint16, w: uint, moorder: MemoryOrder = moA
   t.slots[idx].fetchAdd(w, order = moorder)
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: var uint): bool =
-  t.next.compareExchange(expect, swap, moRelaxed) # Have changed to relaxed as per cpp impl
+  t.next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
 
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool =
-  # Dumb, this needs to have expect be variable
-  (toNode t).next.compareExchange(expect, swap, moRelaxed) # Have changed to relaxed as per cpp impl
+  (toNode t).next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
 
 proc `=destroy`*(n: var Node) =
-  # echo "deallocd"
   deallocAligned(n.addr, NODEALIGN.int)
 
 proc allocNode*(): ptr Node =
-  # echo "allocd"
   cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
 
 proc allocNode*[T](el: T): ptr Node =
-  # echo "allocd"
   result = allocNode()
-  result.slots[0].store(prepareElement el)
+  result.slots[0].store(el)
+  # result.slots[0].store(prepareElement el) <- preparation of the element
+  #                                           to be handled at head of push op
 
 proc tryReclaim*(node: var Node; start: uint16) =
-  # echo "trying to reclaim"
   block done:
     for i in start .. N:
       template s: Atomic[uint] = node.slots[i]
-      # echo "Slot current val ", s.load()
       if (s.load(order = moAcquire) and CONSUMED) != CONSUMED:
         var prev = s.fetchAdd(RESUME, order = moRelaxed) and CONSUMED
-        # echo prev
         if prev != CONSUMED:
           break done
     var flags = node.ctrl.fetchAddReclaim(SLOT)
-    # echo "Try reclaim flag ", flags
     if flags == (ENQ or DEQ):
       `=destroy` node
 
