@@ -94,7 +94,7 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 # This path requires the threads to first help updating the linked list
 # struct before retrying and entering the fast path in the next attempt.
 
-proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
+proc advTail[T](queue: LoonyQueue[T]; el: uint; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
 
   while true:
