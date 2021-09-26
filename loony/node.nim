@@ -56,9 +56,9 @@ proc `=destroy`*(n: var Node) =
 proc allocNode*(): ptr Node =
   cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
 
-proc allocNode*[T](el: T): ptr Node =
+proc allocNode*[T](pel: T): ptr Node =
   result = allocNode()
-  result.slots[0].store(el)
+  result.slots[0].store(pel)
   # result.slots[0].store(prepareElement el) <- preparation of the element
   #                                           to be handled at head of push op
 
