@@ -1,6 +1,6 @@
 version = "0.1.3"
 author = "cabboose"
-description = "fast mpmc queue with sympathetic memory behavior"
+description = "Fast mpmc queue with sympathetic memory behavior"
 license = "MIT"
 
 when not defined(release):
