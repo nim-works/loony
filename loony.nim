@@ -1,5 +1,5 @@
 ## This contains the LoonyQueue object and associated push/pop operations.
-## 
+##
 ## There is a detailed explanation of the algorithm operation within the src
 ## files if you are having issues or want to contribute.
 
@@ -42,10 +42,10 @@ type
 # why an overflow would prove impossible except under extraordinarily
 # large number of thread contention.
 
-proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
-proc node(tag: TagPtr): var Node = cast[ptr Node](tag.nptr)[]
-proc idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
-proc tag(tag: TagPtr): uint16 = tag.idx
+template nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
+template node(tag: TagPtr): var Node = cast[ptr Node](nptr(tag))[]
+template idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
+template tag(tag: TagPtr): uint16 = idx(tag)
 proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
@@ -219,7 +219,7 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
       of AdvOnly:
         discard
 
-  
+
 
 proc push*[T](queue: LoonyQueue[T], el: T) =
   pushImpl(queue, el, forcedCoherance = true)
