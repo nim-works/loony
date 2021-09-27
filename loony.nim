@@ -1,5 +1,5 @@
 ## This contains the LoonyQueue object and associated push/pop operations.
-## 
+##
 ## There is a detailed explanation of the algorithm operation within the src
 ## files if you are having issues or want to contribute.
 
@@ -42,10 +42,10 @@ type
 # why an overflow would prove impossible except under extraordinarily
 # large number of thread contention.
 
-proc nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
-proc node(tag: TagPtr): var Node = cast[ptr Node](tag.nptr)[]
-proc idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
-proc tag(tag: TagPtr): uint16 = tag.idx
+template nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
+template node(tag: TagPtr): var Node = cast[ptr Node](nptr(tag))[]
+template idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
+template tag(tag: TagPtr): uint16 = idx(tag)
 proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
@@ -68,18 +68,16 @@ template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
   (fetchTail queue, fetchHead queue)
 
 template fetchCurrTail(queue: LoonyQueue): NodePtr =
-  ## get the NodePtr of the current tail
+  # get the NodePtr of the current tail
   cast[NodePtr](load(queue.currTail, moRelaxed))
 
 # Bug #11 - Using these as templates would cause errors unless the end user
 # imported std/atomics or we export atomics.
 # For the sake of not polluting the users namespace I have changed these into procs.
+# Atomic inc of idx in (nptr: NodePtr, idx: uint16)
 proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
-  ## Atomic fetchAdd of Tail TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.tail.fetchAdd(1, order = moorder))
-
 proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
-  ## Atomic fetchAdd of Head TagPtr - atomic inc of idx in (nptr: NodePtr, idx: uint16)
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
 
@@ -96,7 +94,7 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 # This path requires the threads to first help updating the linked list
 # struct before retrying and entering the fast path in the next attempt.
 
-proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
+proc advTail[T](queue: LoonyQueue[T]; pel: uint; t: NodePtr): AdvTail =
   ## Modified Michael-Scott algorithm
 
   while true:
@@ -115,7 +113,7 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
 
     var next = t.fetchNext()
     if cast[ptr Node](next).isNil():
-      var node = cast[uint](allocNode el)
+      var node = cast[uint](allocNode pel)
       var null = 0'u
       if t.compareAndSwapNext(null, node):
         result = AdvAndInserted
@@ -130,9 +128,10 @@ proc advTail[T](queue: LoonyQueue[T]; el: T; t: NodePtr): AdvTail =
 
 proc advHead(queue: LoonyQueue; curr: var TagPtr;
              h, t: NodePtr): AdvHead =
-  #when false:                     # we can't decide if this matters 😏
   if h.idx == N:
-    tryReclaim(h.toNode, 0'u8)  # Yes it matters you monster
+    # This should reliably trigger reclamation of the node memory on the last
+    # read of the head.
+    tryReclaim(h.toNode, 0'u8)
   var next = fetchNext h
   result =
     if cast[ptr Node](next).isNil() or (t == h):
@@ -141,7 +140,6 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
     else:
       # Equivalent to (nptr: NodePtr, idx: idx+=1)
       curr += 1
-      # equivalent to (nptr: next, idx: 0)
       block done:
         while not queue.compareAndSwapHead(curr, next.nptr):
           if curr.nptr != h:
@@ -179,49 +177,54 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
 # announce both operations completion (in case of a read) and also makes
 # determining the order in which two operations occured possible.
 
-proc push*[T](queue: LoonyQueue[T], el: T) =
+proc pushImpl[T](queue: LoonyQueue[T], el: T,
+                    forcedCoherance: static bool = false) =
+  # Begin by tagging pointer el with WRITER bit
+  var pel = prepareElement el
+  # Ensure all writes in STOREBUFFER are committed. By far the most costly
+  # primitive; it will be preferred while proving safety before working towards
+  # optimisation by atomic reads/writes of cache lines related to el
+  when forcedCoherance:
+    atomicThreadFence(ATOMIC_RELEASE)
   while true:
-    ## The enqueue procedure begins with incrementing the
-    ## index of the associated node in the TagPtr
+    # Enq proc begins with incr the index of node in TagPtr
     var tag = fetchIncTail(queue)
     if likely(tag.idx < N):
-      ## We begin by tagging the pointer for el with a WRITER
-      ## bit and then perform a FAA.
-      var w = prepareElement el
-      let prev = tag.fetchAddSlot w
+      # FAST PATH OPERATION - 99% of push will enter here; we want the minimal
+      # amount of necessary operations in this path.
+      # Perform a FAA on our reserved slot which should be 0'd.
+      let prev = tag.fetchAddSlot pel
       case prev
       of 0, RESUME:
         break           # the slot was empty; we're good to go
 
-      # If however we assess that the READER bit was already set before
-      # we arrived, then the corresponding dequeue operation arrived too
-      # early and we must consequently abandon the slot and retry.
+      # If READER bit already set,then the corresponding deq op arrived
+      # early; we must consequently abandon the slot and retry.
 
       of RESUME or READER:
-        # Checking for the presence of the RESUME bit only pertains to
-        # the memory reclamation mechanism and is only relevant
-        # in rare edge cases in which the enqueue operation
-        # is significantly delayed and lags behind most other operations
-        # on the same node.proc
+        # Checking RESUME bit pertains to memory reclamation mechanism;
+        # only relevant in rare edge cases in which the Enq op significantly
+        # delayed and lags behind other ops on the same node
         tryReclaim(tag.node, tag.idx + 1)
       else:
         # Should the case above occur or we detect that the slot has been
         # filled by some gypsy magic then we will retry on the next loop.
         discard
 
-      # afaict, this is fine...
-      when false:
-        warn "FAST PATH PUSH encountered pre-filled slot #", tag.idx
-        warn "had flags: ", (prev and (RESUME or CONSUMED))
-
     else:
-      # Slow path; modified version of Michael-Scott algorithm; see
-      # advTail above
-      case queue.advTail(el, tag.nptr)
+      # SLOW PATH; modified version of Michael-Scott algorithm
+      case queue.advTail(pel, tag.nptr)
       of AdvAndInserted:
         break
       of AdvOnly:
         discard
+
+
+
+proc push*[T](queue: LoonyQueue[T], el: T) =
+  pushImpl(queue, el, forcedCoherance = true)
+proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+  pushImpl(queue, el, forcedCoherance = false)
 
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
   if head.idx >= N or head.idx >= tail.idx:
@@ -231,36 +234,55 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc pop*[T](queue: LoonyQueue[T]): T =
+proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
   while true:
-    ## Before incrementing the dequeue index, an initial check must be
-    ## performed to determine if the queue is empty.
-    ## Ensure head is loaded last to keep mem hot
+    # Before incr the deq index, init check performed to determine if queue is empty.
+    # Ensure head is loaded last to keep mem hot
     var (tail, curr) = tailAndMane queue
     if isEmptyImpl(curr, tail):
-      return nil # Um ok
+      # Queue was empty; nil can be caught in cps w/ "while cont.running"
+      return nil
 
     var head = queue.fetchIncHead()
     if likely(head.idx < N):
+      # FAST PATH OPS
       var prev = head.fetchAddSlot READER
-      # On the last slot in a node, we initiate the reclaim
-      # procedure; if the writer bit is set then the upper bits
-      # must contain a valid pointer to an enqueued element
-      # that can be returned (see enqueue)
+      # Last slot in a node - init reclaim proc; if WRITER bit set then upper bits
+      # contain a valid pointer to an enqd el that can be returned (see enqueue)
       if not unlikely((prev and SLOTMASK) == 0):
         if (prev and spec.WRITER) != 0:
           if unlikely((prev and RESUME) != 0):
             tryReclaim(head.node, head.idx + 1)
+
+          # Ideally before retrieving the ref object itself, we want to allow
+          # CPUs to communicate cache line changes and resolve invalidations
+          # to dirty memory.
+          when forcedCoherance:
+            atomicThreadFence(ATOMIC_ACQUIRE)
+          # CPU halt and clear STOREBUFFER; overwritten cache lines will be
+          # syncd and invalidated ensuring fresh memory from this point in line
+          # with the PUSH operations atomicThreadFence(ATOMIC_RELEASE)
+          # This is the most costly primitive fill the requirement and will be
+          # preferred to prove safety before optimising by targetting specific
+          # cache lines with atomic writes and loads rather than requiring a
+          # CPU to completely commit its STOREBUFFER
+
           result = cast[T](prev and SLOTMASK)
           assert result != nil
           GC_unref result
           break
     else:
+      # SLOW PATH OPS
       case queue.advHead(curr, head.nptr, tail.nptr)
       of Advanced:
         discard
       of QueueEmpty:
-        break           # big oof
+        break
+
+proc pop*[T](queue: LoonyQueue[T]): T =
+  popImpl(queue, forcedCoherance = true)
+proc unsafePop*[T](queue: LoonyQueue[T]): T =
+  popImpl(queue, forcedCoherance = false)
 
 # Consumed slots have been written to and then read. If a concurrent
 # deque operation outpaces the corresponding enqueue operation then both

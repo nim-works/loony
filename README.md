@@ -62,10 +62,9 @@ Download with `nimble install loony` (CPS dependency for tests) or directly from
 
 Simple.
 
-First, ensure you compile with arc and threads (`--gc:arc --threads:on`); the atomic operations will not be available from the main lib otherwise.
+First, ensure you compile with arc and threads (`--gc:arc --threads:on`)
 
 Then:
-
 ```nim
 import pkg/loony
 
@@ -78,12 +77,22 @@ var aro = new AnyRefObject
 
 loonyQueue.push aro
 # Enqueue objects onto the queue
+# unsafePush is available, see MemorySafety & Cache Coherance below!
 
 var el = loonyQueue.pop
 # Dequeue objects from the queue
+# unsafePop is available, see MemorySafety & Cache Coherance below!
 ```
 
-Not much else to it!
+#### Memory Safety & Cache Coherance
+
+Loonys standard Push and Pop operations offer a good level of cache coherancy
+automatically using sync primitives such as atomic_thread_fence. Atomic thread
+fences ensure a CPUs store buffer is committed on the push operation and read
+on the pop operation. This is a higher cost primitive; those who know what
+they are doing can use `unsafePush` and `unsafePop` instead; this will provide
+the speed and functionality of loony as it originally was without the cache
+coherance primitive cost added ontop.
 
 ## Benchmarks
 
