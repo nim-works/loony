@@ -46,7 +46,6 @@ With the 11 bit aligned implementation we have:
 - Memory-leak free under **ARC**
 - Can pass ANY ref object between threads; however:
   - Is perfectly designed for passing Continuations between threads
-  - :warning: Memory safety is up to the user, data races accessing memory associated with the reference are not prevented (*currently :wink:*)
 
 ## Issues
 
