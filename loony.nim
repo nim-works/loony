@@ -8,6 +8,9 @@ import std/atomics
 import loony/spec
 import loony/node
 
+when defined(loonyDebug):
+  export node.echoDebugNodeCounter, node.debugNodeCounter
+  
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
 # raise Defect(nil) | salt bae of defects
@@ -126,26 +129,25 @@ proc advTail[T](queue: LoonyQueue[T]; pel: uint; t: NodePtr): AdvTail =
       tailSwapper(next)
       break
 
-proc advHead(queue: LoonyQueue; curr: var TagPtr;
-             h, t: NodePtr): AdvHead =
+proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   if h.idx == N:
     # This should reliably trigger reclamation of the node memory on the last
     # read of the head.
-    tryReclaim(h.toNode, 0'u8)
-  var next = fetchNext h
+    tryReclaim(h.node, 0'u8)
   result =
-    if cast[ptr Node](next).isNil() or (t == h):
-      incrDeqCount h.toNode
+    if t.nptr == h.nptr:
+      incrDeqCount h.node
       QueueEmpty
     else:
+      var next = fetchNext h.nptr
       # Equivalent to (nptr: NodePtr, idx: idx+=1)
       curr += 1
       block done:
-        while not queue.compareAndSwapHead(curr, next.nptr):
-          if curr.nptr != h:
-            incrDeqCount h.toNode
+        while not queue.compareAndSwapHead(curr, next):
+          if curr.nptr != h.nptr:
+            incrDeqCount h.node
             break done
-        incrDeqCount(h.toNode, curr.idx - N)
+        incrDeqCount(h.node, curr.idx - N)
       Advanced
 
 # Fundamentally, both enqueue and dequeue operations attempt to
@@ -221,9 +223,9 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
 
 
-proc push*[T](queue: LoonyQueue[T], el: T) =
+template push*[T](queue: LoonyQueue[T], el: T) =
   pushImpl(queue, el, forcedCoherance = true)
-proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+template unsafePush*[T](queue: LoonyQueue[T], el: T) =
   pushImpl(queue, el, forcedCoherance = false)
 
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
@@ -273,15 +275,15 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           break
     else:
       # SLOW PATH OPS
-      case queue.advHead(curr, head.nptr, tail.nptr)
+      case queue.advHead(curr, head, tail)
       of Advanced:
         discard
       of QueueEmpty:
         break
 
-proc pop*[T](queue: LoonyQueue[T]): T =
+template pop*[T](queue: LoonyQueue[T]): T =
   popImpl(queue, forcedCoherance = true)
-proc unsafePop*[T](queue: LoonyQueue[T]): T =
+template unsafePop*[T](queue: LoonyQueue[T]): T =
   popImpl(queue, forcedCoherance = false)
 
 # Consumed slots have been written to and then read. If a concurrent

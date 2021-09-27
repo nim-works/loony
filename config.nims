@@ -25,3 +25,5 @@ switch("gc", "arc")
 
 # default to enable debugging for now
 switch("define", "loonyDebug")
+# Now that I've added a counter for node allocations should this be disabled
+# by default?

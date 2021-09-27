@@ -5,9 +5,26 @@ import loony/memalloc
 
 type
   Node* = object
-    slots* : array[0..N, Atomic[uint]]  # Pointers to object
+    slots* : array[N, Atomic[uint]]  # Pointers to object
     next*  : Atomic[NodePtr]            # NodePtr - successor node
     ctrl*  : ControlBlock               # Control block for mem recl
+
+when defined(loonyDebug):
+  var nodeCounter* {.global.}: Atomic[int]
+  nodeCounter.store(0)
+
+  proc echoDebugNodeCounter*(expected: int = 0) =
+    ## This will output the counter if it is above the expected value
+    let counter = nodeCounter.load()
+    if counter > 0:
+      warn "Node counter: " & $nodeCounter.load()
+  
+  template debugNodeCounter*(body: untyped) =
+    let initC = nodeCounter.load()
+    body
+    let newC = nodeCounter.load()
+    if (newC - initC) > 0:
+      warn "Finished block with node count of " & $(nodeCounter.load() - initC)
 
 template toNodePtr*(pt: uint | ptr Node): NodePtr =
   # Convert ptr Node into NodePtr uint
@@ -51,20 +68,22 @@ template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: var uint): bool
   (toNode t).next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
 
 proc `=destroy`*(n: var Node) =
+  when defined(loonyDebug):
+    discard nodeCounter.fetchSub(1, moSequentiallyConsistent)
   deallocAligned(n.addr, NODEALIGN.int)
 
 proc allocNode*(): ptr Node =
+  when defined(loonyDebug):
+    discard nodeCounter.fetchAdd(1, moSequentiallyConsistent)
   cast[ptr Node](allocAligned0(sizeof(Node), NODEALIGN.int))
 
 proc allocNode*[T](pel: T): ptr Node =
   result = allocNode()
   result.slots[0].store(pel)
-  # result.slots[0].store(prepareElement el) <- preparation of the element
-  #                                           to be handled at head of push op
 
 proc tryReclaim*(node: var Node; start: uint16) =
   block done:
-    for i in start .. N:
+    for i in start..<N:
       template s: Atomic[uint] = node.slots[i]
       if (s.load(order = moAcquire) and CONSUMED) != CONSUMED:
         var prev = s.fetchAdd(RESUME, order = moRelaxed) and CONSUMED

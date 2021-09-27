@@ -11,7 +11,7 @@ import cps
 import loony
 
 const
-  continuationCount = when defined(windows): 1_000 else: 10_000
+  continuationCount = when defined(windows): 10_000 else: 10_000 # stop hamstringing me
 let
   threadCount = when defined(danger): countProcessors() else: 1
 
@@ -48,8 +48,8 @@ var counter {.global.}: Atomic[int]
 when defined(windows):
   proc noop(c: C): C {.cpsMagic.} =
     sleep:
-      when defined(danger):
-        1
+      when defined(danger) and false: # I'm the only person using windows
+        1                             # and this is annoying
       else:
         0 # 🤔
     c
@@ -108,17 +108,19 @@ suite "loony":
 
     counter.store 0
     dumpAllocStats:
-      for i in 0 ..< continuationCount:
-        var c = whelp doContinualThings()
-        discard enqueue c
-      checkpoint "queued $# continuations" % [ $continuationCount ]
+      debugNodeCounter:
+        for i in 0 ..< continuationCount:
+          var c = whelp doContinualThings()
+          discard enqueue c
+        checkpoint "queued $# continuations" % [ $continuationCount ]
 
-      for thread in threads.mitems:
-        createThread(thread, runThings)
-      checkpoint "created $# threads" % [ $threadCount ]
+        for thread in threads.mitems:
+          createThread(thread, runThings)
+        checkpoint "created $# threads" % [ $threadCount ]
 
-      for thread in threads.mitems:
-        joinThread thread
-      checkpoint "joined $# threads" % [ $threadCount ]
+        for thread in threads.mitems:
+          joinThread thread
+        checkpoint "joined $# threads" % [ $threadCount ]
 
-      expectCounter continuationCount
+
+        expectCounter continuationCount
