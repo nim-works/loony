@@ -177,8 +177,8 @@ proc advHead(queue: LoonyQueue; curr: var TagPtr;
 # announce both operations completion (in case of a read) and also makes
 # determining the order in which two operations occured possible.
 
-template pushImpl[T](queue: LoonyQueue[T], el: T,
-                    forcedCoherance: bool = false) =
+proc pushImpl[T](queue: LoonyQueue[T], el: T,
+                    forcedCoherance: static bool = false) =
   # Begin by tagging pointer el with WRITER bit
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
@@ -234,7 +234,7 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-template popImpl[T](queue: LoonyQueue[T]; forcedCoherance: bool = false): T =
+proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
