@@ -11,7 +11,7 @@ import cps
 import loony
 
 const
-  continuationCount = when defined(windows): 10_000 else: 10_000 # stop hamstringing me
+  continuationCount = when defined(windows): 10_000 else: 10_000
 let
   threadCount = when defined(danger): countProcessors() else: 1
 
@@ -48,8 +48,8 @@ var counter {.global.}: Atomic[int]
 when defined(windows):
   proc noop(c: C): C {.cpsMagic.} =
     sleep:
-      when defined(danger) and false: # I'm the only person using windows
-        1                             # and this is annoying
+      when defined(danger) and false: # Reduce cont count on windows before adding sleep
+        1
       else:
         0 # 🤔
     c
@@ -109,6 +109,8 @@ suite "loony":
     counter.store 0
     dumpAllocStats:
       debugNodeCounter:
+        # If `loonyDebug` is defined this will output number of nodes you started
+        # with - the number of nodes you end with (= non-deallocated nodes)
         for i in 0 ..< continuationCount:
           var c = whelp doContinualThings()
           discard enqueue c
