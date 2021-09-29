@@ -93,6 +93,27 @@ they are doing can use `unsafePush` and `unsafePop` instead; this will provide
 the speed and functionality of loony as it originally was without the cache
 coherance primitive cost added ontop.
 
+### Debugging
+
+Pass `--d:loonyDebug` in compilation or with a config nimscript to use debug
+procedures and templates.
+
+> Warning :warning: this switch causes node allocations and deallocations to
+> write on an atomic counter which does marginally effect performance!
+
+`echoDebugNodeCounter() # Echos the current number of nodes in the queue`
+
+```nim
+debugNodeCounter:
+  # Put things onto the queue an off the queue here! At the
+  # end of the template, if the number of nodes you started
+  # with does not equal the number of nodes you finished
+  # the block with, it will print information that is useful
+  # to finding the source of the leak! This template will not
+  # do anything if loonyDebug is off.
+  discard
+```
+
 ## Benchmarks
 
 TBD
