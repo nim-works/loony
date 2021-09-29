@@ -8,6 +8,8 @@ import std/atomics
 import loony/spec
 import loony/node
 
+export
+  node.echoDebugNodeCounter, node.debugNodeCounter  
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
 # raise Defect(nil) | salt bae of defects
@@ -87,6 +89,8 @@ template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
+template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+  queue.currTail.compareExchange(expect, swap)
 # Both enqueue and dequeue enter FAST PATH operations 99% of the time,
 # however in cases we enter the SLOW PATH operations represented in both
 # enq and deq by advTail and advHead respectively.
@@ -94,58 +98,83 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 # This path requires the threads to first help updating the linked list
 # struct before retrying and entering the fast path in the next attempt.
 
-proc advTail[T](queue: LoonyQueue[T]; pel: uint; t: NodePtr): AdvTail =
-  ## Modified Michael-Scott algorithm
-
-  while true:
-    var tail = queue.fetchTail
-    if t != tail.nptr:
-      incrEnqCount t.toNode
-      result = AdvOnly
-      break
-
-    template tailSwapper(with: uint): untyped {.dirty.} =
-      while not queue.compareAndSwapTail(tail, with + 1):
-        if t != tail.nptr:
-          incrEnqCount t.toNode
-          break
-      incrEnqCount(t.toNode, tail.idx - N)
-
-    var next = t.fetchNext()
-    if cast[ptr Node](next).isNil():
-      var node = cast[uint](allocNode pel)
-      var null = 0'u
-      if t.compareAndSwapNext(null, node):
-        result = AdvAndInserted
-        tailSwapper(node)
-        break
+proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
+  # Modified version of Michael-Scott algorithm
+  # Attempt allocate & append new node on previous tail
+  var origTail = tag.nptr
+  block done:
+    while true:
+      # First we get the current tail
+      var currTTag = queue.fetchTail()
+      if origTail != currTTag.nptr:
+        # Another thread has appended a new node already. Help clean node up.
+        incrEnqCount origTail.toNode
+        result = AdvOnly
+        break done
+      # Get current tails next node
+      var next = origTail.fetchNext()
+      if cast[ptr Node](next).isNil():
+        # Prepare the new node with our element in it
+        var (node, null) = (allocNode pel, 0'u)  # Atomic compareExchange requires variables
+        if origTail.compareAndSwapNext(null, node.toUint):
+          # Successfully inserted our node into current/original nodes next
+          # Since we have already inserted a slot, we try to replace the queues
+          # tail tagptr with the new node with an index of 1
+          while not queue.compareAndSwapTail(currTTag, node.toUint + 1):
+            # Loop is not relevant to compareAndSwapStrong; consider weak swap?
+            if currTTag.nptr != origTail:
+              # REVIEW This does not make sense unless we reload the
+              #        the current tag?
+              incrEnqCount origTail.toNode
+              result = AdvAndInserted
+              break done
+          # Successfully updated the queue.tail and node.next with our new node
+          # Help clean up this node
+          incrEnqCount(origTail.toNode, currTTag.idx - N)
+          result = AdvAndInserted
+          break done
+        # Another thread inserted a new node before we could; deallocate and try
+        # again. New currTTag will mean we enter the first if condition statement.
+        deallocNode node
       else:
-        `=destroy`(cast[ptr Node](node)[])
-    else: # T20
-      result = AdvOnly
-      tailSwapper(next)
-      break
+        # The next node has already been set, help the thread to set the next
+        # node in the queue tail
+        while not queue.tail.compareExchange(currTTag, next + 1):
+          # Loop is not relevant to CAS-strong; consider weak CAS?
+          if currTTag.nptr != origTail:
+            # REVIEW this does not make sense unless we reload the current tag?
+            incrEnqCount origTail.toNode
+            result = AdvOnly
+            break done
+        # Successfully updated the queue.tail with another threads node; we
+        # help clean up this node and thread is free to adv and try push again
+        incrEnqCount(origTail.toNode, currTTag.idx - N)
+        result = AdvOnly
+        break done
 
-proc advHead(queue: LoonyQueue; curr: var TagPtr;
-             h, t: NodePtr): AdvHead =
+
+
+    
+
+proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   if h.idx == N:
     # This should reliably trigger reclamation of the node memory on the last
     # read of the head.
-    tryReclaim(h.toNode, 0'u8)
-  var next = fetchNext h
+    tryReclaim(h.node, 0'u8)
   result =
-    if cast[ptr Node](next).isNil() or (t == h):
-      incrDeqCount h.toNode
+    if t.nptr == h.nptr:
+      incrDeqCount h.node
       QueueEmpty
     else:
+      var next = fetchNext h.nptr
       # Equivalent to (nptr: NodePtr, idx: idx+=1)
       curr += 1
       block done:
-        while not queue.compareAndSwapHead(curr, next.nptr):
-          if curr.nptr != h:
-            incrDeqCount h.toNode
+        while not queue.compareAndSwapHead(curr, next):
+          if curr.nptr != h.nptr:
+            incrDeqCount h.node
             break done
-        incrDeqCount(h.toNode, curr.idx - N)
+        incrDeqCount(h.node, curr.idx - N)
       Advanced
 
 # Fundamentally, both enqueue and dequeue operations attempt to
@@ -213,7 +242,7 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
     else:
       # SLOW PATH; modified version of Michael-Scott algorithm
-      case queue.advTail(pel, tag.nptr)
+      case queue.advTail(pel, tag)
       of AdvAndInserted:
         break
       of AdvOnly:
@@ -273,7 +302,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           break
     else:
       # SLOW PATH OPS
-      case queue.advHead(curr, head.nptr, tail.nptr)
+      case queue.advHead(curr, head, tail)
       of Advanced:
         discard
       of QueueEmpty:
@@ -308,7 +337,7 @@ proc initLoonyQueue*(q: LoonyQueue) =
   q.head.store headTag
   q.tail.store tailTag
   q.currTail.store tailTag
-  for i in 0..N:
+  for i in 0..<N:
     var h = load headTag.toNode().slots[i]
     var t = load tailTag.toNode().slots[i]
     assert h == 0, "Slot found to not be nil on initialisation"

@@ -12,8 +12,7 @@ const
   DEQ*      =   uint8(1 shl 1) # 0000_0010
   ENQ*      =   uint8(1 shl 2) # 0000_0100
   #
-  NUMSLOTS*        =         1024     # Number of slots per node in the queue
-  N*        =         NUMSLOTS - 1     # Number of slots per node in the queue
+  N*        =         1024     # Number of slots per node in the queue
   #
   TAGBITS*   : uint = 11             # Each node must be aligned to this value
   NODEALIGN* : uint = 1 shl TAGBITS  # in order to store the required number of
@@ -50,10 +49,10 @@ proc getHigh*(mask: ControlMask): uint16 =
 proc getLow*(mask: ControlMask): uint16 =
   mask.uint16
 
-proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moAcquire): ControlMask =
+proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moRelease): ControlMask =
   ctrl.tailMask.fetchAdd(v, order = moorder)
 
-proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moAcquire): ControlMask =
+proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moRelease): ControlMask =
   ctrl.headMask.fetchAdd(v, order = moorder)
 
 proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, moorder: MemoryOrder = moAcquireRelease): uint8 =
