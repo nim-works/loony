@@ -39,6 +39,8 @@ After adapting the algorithm to nim CPS, disruptek adapted the queue for **any r
 > While the following is possible; this is only by increasing the alignment our 'node' pointers to 16 which would invariably effect performance.
 >- Lock-free consumption by up to **32,255** threads
 >- Lock-free production by up to **64,610** threads
+>
+> You can use `-d:LoonyNodeAlignment=16` or whatever alignment you wish to adjust the contention capacity.
 
 With the 11 bit aligned implementation we have:
 - Lock-free consumption up to **512** threads
@@ -69,7 +71,7 @@ import pkg/loony
 
 type AnyRefObject = ref object
 
-var loonyQueue = initLoonyQueue[AnyRefObject]()
+var loonyQueue = newLoonyQueue[AnyRefObject]()
 # loony queue is a ref object itself
 
 var aro = new AnyRefObject
@@ -113,6 +115,14 @@ debugNodeCounter:
   # do anything if loonyDebug is off.
   discard
 ```
+
+### Compiler Flags
+
+We recommend against changing these values unless you know what you are doing. The suggested max alignment is 16 to achieve drastically higher contention capacities. Compilation will fail if your alignment does not fit the slot count index.
+
+`-d:LoonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
+
+`-d:LoonySlotCount=1024` - Adjust the number of slots in each node
 
 ## Benchmarks
 
