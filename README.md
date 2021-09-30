@@ -71,7 +71,7 @@ import pkg/loony
 
 type AnyRefObject = ref object
 
-var loonyQueue = newLoonyQueue[AnyRefObject]()
+let loonyQueue = newLoonyQueue[AnyRefObject]()
 # loony queue is a ref object itself
 
 var aro = new AnyRefObject

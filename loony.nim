@@ -208,7 +208,7 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
 
 proc pushImpl[T](queue: LoonyQueue[T], el: T,
                     forcedCoherance: static bool = false) =
-  assert not queue.isNil(), "The queue has not been initialised"
+  doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
@@ -252,8 +252,16 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
 
 proc push*[T](queue: LoonyQueue[T], el: T) =
+  ## Push an item onto the end of the LoonyQueue.
+  ## This operation ensures some level of cache coherency using atomic thread fences.
+  ## 
+  ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherance = true)
 proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+  ## Push an item onto the end of the LoonyQueue.
+  ## Unlike push, this operation does not use atomic thread fences. This means you
+  ## may get undefined behaviour if the receiving thread has old cached memory
+  ## related to this element
   pushImpl(queue, el, forcedCoherance = false)
 
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
@@ -261,11 +269,13 @@ proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
     result = head.nptr == tail.nptr
 
 proc isEmpty*(queue: LoonyQueue): bool =
+  ## This operation should only be used by internal code. The response for this
+  ## operation is not precise.
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
 proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
-  assert not queue.isNil(), "The queue has not been initialised"
+  doAssert not queue.isNil(), "The queue has not been initialised"
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
@@ -311,8 +321,16 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
         break
 
 proc pop*[T](queue: LoonyQueue[T]): T =
+  ## Remove and return to the caller the next item in the LoonyQueue.
+  ## This operation ensures some level of cache coherency using atomic thread fences.
+  ## 
+  ## Use unsafePop to avoid this cost.
   popImpl(queue, forcedCoherance = true)
 proc unsafePop*[T](queue: LoonyQueue[T]): T =
+  ## Remove and return to the caller the next item in the LoonyQueue.
+  ## Unlike pop, this operation does not use atomic thread fences. This means you
+  ## may get undefined behaviour if the caller has old cached memory that is
+  ## related to the item.
   popImpl(queue, forcedCoherance = false)
 
 # Consumed slots have been written to and then read. If a concurrent
@@ -354,5 +372,6 @@ proc initLoonyQueue*[T](): LoonyQueue[T] {.deprecated: "Use newLoonyQueue instea
   initLoonyQueue result
 
 proc newLoonyQueue*[T](): LoonyQueue[T] =
+  ## Return an intialized LoonyQueue.
   new result
   initLoonyQueue result
