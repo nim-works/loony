@@ -5,7 +5,7 @@ on:
 
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
       - '*'
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['macos-latest', 'ubuntu-latest', 'windows-latest']
+        os: ['macos-latest'] #, 'ubuntu-latest']
         nim: ['devel', 'version-1-6']
     name: '${{ matrix.os }} (${{ matrix.nim }})'
     runs-on: ${{ matrix.os }}
@@ -60,7 +60,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          path: ci
+          path: cps
 
       - name: Setup Nim
         uses: alaviss/setup-nim@0.1.1
@@ -68,10 +68,18 @@ jobs:
           path: nim
           version: ${{ matrix.nim }}
 
+      - name: Run examples
+        shell: bash
+        run: |
+          cd cps
+          nimble --accept develop
+          cd examples
+          env GITHUB_ACTIONS=false balls --path=".."
+
       - name: Run tests
         shell: bash
         run: |
-          cd ci
+          cd cps
           nimble --accept develop
           nimble test
 
@@ -79,24 +87,24 @@ jobs:
         if: ${{ matrix.docs }} == 'true'
         shell: bash
         run: |
-          cd ci
+          cd cps
           branch=${{ github.ref }}
           branch=${branch##*/}
           nimble doc --project --outdir:docs --path="." \
             '--git.url:https://github.com/${{ github.repository }}' \
             '--git.commit:${{ github.sha }}' \
             "--git.devel:$branch" \
-            loony.nim
+            cps.nim
           # Ignore failures for older Nim
           cp docs/{the,}index.html || true
 
       - name: Publish docs
         if: >
-          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/master' &&
           matrix.os == 'macos-latest' && matrix.nim == 'devel'
         uses: crazy-max/ghaction-github-pages@v2.5.0
         with:
-          build_dir: ci/docs
+          build_dir: cps/docs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
