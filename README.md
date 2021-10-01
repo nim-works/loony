@@ -1,4 +1,13 @@
 # Loony
+
+<div align="center">
+	<br>
+	<a href="https://github.com/nim-works/loony">
+		<img src="papers/header.svg" width="800" height="200" alt="Loony">
+	</a>
+	<br>
+</div>
+
 [![Test Matrix](https://github.com/disruptek/cps/workflows/CI/badge.svg)](https://github.com/shayanhabibi/loony/actions?query=workflow%3ACI)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shayanhabibi/loony?style=flat)](https://github.com/shayanhabibi/loony/releases/latest)
 ![Minimum supported Nim version](https://img.shields.io/badge/nim-1.5.1%2B-informational?style=flat&logo=nim)
@@ -39,6 +48,8 @@ After adapting the algorithm to nim CPS, disruptek adapted the queue for **any r
 > While the following is possible; this is only by increasing the alignment our 'node' pointers to 16 which would invariably effect performance.
 >- Lock-free consumption by up to **32,255** threads
 >- Lock-free production by up to **64,610** threads
+>
+> You can use `-d:LoonyNodeAlignment=16` or whatever alignment you wish to adjust the contention capacity.
 
 With the 11 bit aligned implementation we have:
 - Lock-free consumption up to **512** threads
@@ -67,12 +78,12 @@ Then:
 ```nim
 import pkg/loony
 
-type AnyRefObject = ref object
+type TestRef = ref object
 
-var loonyQueue = initLoonyQueue[AnyRefObject]()
-# loony queue is a ref object itself
+let loonyQueue = newLoonyQueue[TestRef]()
+# Loony takes reference pointers and sends them safely!
 
-var aro = new AnyRefObject
+var aro = new TestRef
 
 loonyQueue.push aro
 # Enqueue objects onto the queue
@@ -113,6 +124,14 @@ debugNodeCounter:
   # do anything if loonyDebug is off.
   discard
 ```
+
+### Compiler Flags
+
+We recommend against changing these values unless you know what you are doing. The suggested max alignment is 16 to achieve drastically higher contention capacities. Compilation will fail if your alignment does not fit the slot count index.
+
+`-d:LoonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
+
+`-d:LoonySlotCount=1024` - Adjust the number of slots in each node
 
 ## Benchmarks
 

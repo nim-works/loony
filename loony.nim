@@ -47,7 +47,6 @@ type
 template nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
 template node(tag: TagPtr): var Node = cast[ptr Node](nptr(tag))[]
 template idx(tag: TagPtr): uint16 = uint16(tag and TAGMASK)
-template tag(tag: TagPtr): uint16 = idx(tag)
 proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
@@ -69,7 +68,7 @@ template maneAndTail(queue: LoonyQueue): (TagPtr, TagPtr) =
 template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
   (fetchTail queue, fetchHead queue)
 
-template fetchCurrTail(queue: LoonyQueue): NodePtr =
+template fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
   # get the NodePtr of the current tail
   cast[NodePtr](load(queue.currTail, moRelaxed))
 
@@ -89,7 +88,8 @@ template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
+                                swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
 # Both enqueue and dequeue enter FAST PATH operations 99% of the time,
 # however in cases we enter the SLOW PATH operations represented in both
@@ -208,6 +208,7 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
 
 proc pushImpl[T](queue: LoonyQueue[T], el: T,
                     forcedCoherance: static bool = false) =
+  doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
@@ -251,8 +252,16 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
 
 proc push*[T](queue: LoonyQueue[T], el: T) =
+  ## Push an item onto the end of the LoonyQueue.
+  ## This operation ensures some level of cache coherency using atomic thread fences.
+  ## 
+  ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherance = true)
 proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+  ## Push an item onto the end of the LoonyQueue.
+  ## Unlike push, this operation does not use atomic thread fences. This means you
+  ## may get undefined behaviour if the receiving thread has old cached memory
+  ## related to this element
   pushImpl(queue, el, forcedCoherance = false)
 
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
@@ -260,10 +269,13 @@ proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
     result = head.nptr == tail.nptr
 
 proc isEmpty*(queue: LoonyQueue): bool =
+  ## This operation should only be used by internal code. The response for this
+  ## operation is not precise.
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
 proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
+  doAssert not queue.isNil(), "The queue has not been initialised"
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
@@ -309,8 +321,16 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
         break
 
 proc pop*[T](queue: LoonyQueue[T]): T =
+  ## Remove and return to the caller the next item in the LoonyQueue.
+  ## This operation ensures some level of cache coherency using atomic thread fences.
+  ## 
+  ## Use unsafePop to avoid this cost.
   popImpl(queue, forcedCoherance = true)
 proc unsafePop*[T](queue: LoonyQueue[T]): T =
+  ## Remove and return to the caller the next item in the LoonyQueue.
+  ## Unlike pop, this operation does not use atomic thread fences. This means you
+  ## may get undefined behaviour if the caller has old cached memory that is
+  ## related to the item.
   popImpl(queue, forcedCoherance = false)
 
 # Consumed slots have been written to and then read. If a concurrent
@@ -345,8 +365,13 @@ proc initLoonyQueue*(q: LoonyQueue) =
   # I mean the enqueue and dequeue pretty well handle any issues with
   # initialising, but I might as well help allocate the first ones right?
 
-proc initLoonyQueue*[T](): LoonyQueue[T] =
+proc initLoonyQueue*[T](): LoonyQueue[T] {.deprecated: "Use newLoonyQueue instead".} =
   ## Return an initialized LoonyQueue.
   # TODO destroy proc
+  new result
+  initLoonyQueue result
+
+proc newLoonyQueue*[T](): LoonyQueue[T] =
+  ## Return an intialized LoonyQueue.
   new result
   initLoonyQueue result
