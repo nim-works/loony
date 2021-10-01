@@ -13,9 +13,6 @@ on:
 
 jobs:
   changes:
-    # Disable the filter on scheduled runs because we don't want to skip those
-    if: github.event_name != 'schedule'
-    continue-on-error: true # Makes sure errors won't stop us
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.filter.outputs.src }}
@@ -37,30 +34,26 @@ jobs:
               - '**.nimble'
               - 'tests/**'
               - '.github/workflows/ci.yml'
-
   build:
     # Build if the files we care about are changed.
     needs: changes
     # Make sure to always run regardless of whether the filter success or not.
     # When the filter fails there won't be an output, so checking for `false`
     # state is better than checking for `true`.
-    #
-    # The always() function here is required for the job to always run despite
-    # what Github docs said, see: https://github.com/actions/runner/issues/491
-    if: always() && needs.changes.outputs.src != 'false'
+    if: needs.changes.outputs.src != 'false'
 
     strategy:
       fail-fast: false
       matrix:
         os: ['macos-latest'] #, 'ubuntu-latest']
-        nim: ['devel', 'version-1-6']
+        nim: ['devel']
     name: '${{ matrix.os }} (${{ matrix.nim }})'
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
-          path: cps
+          path: ci
 
       - name: Setup Nim
         uses: alaviss/setup-nim@0.1.1
@@ -68,43 +61,33 @@ jobs:
           path: nim
           version: ${{ matrix.nim }}
 
-      - name: Run examples
-        shell: bash
-        run: |
-          cd cps
-          nimble --accept develop
-          cd examples
-          env GITHUB_ACTIONS=false balls --path=".."
-
       - name: Run tests
         shell: bash
         run: |
-          cd cps
+          cd ci
           nimble --accept develop
           nimble test
-
       - name: Build docs
         if: ${{ matrix.docs }} == 'true'
         shell: bash
         run: |
-          cd cps
+          cd ci
           branch=${{ github.ref }}
           branch=${branch##*/}
           nimble doc --project --outdir:docs --path="." \
             '--git.url:https://github.com/${{ github.repository }}' \
             '--git.commit:${{ github.sha }}' \
             "--git.devel:$branch" \
-            cps.nim
+            loony.nim
           # Ignore failures for older Nim
           cp docs/{the,}index.html || true
-
       - name: Publish docs
         if: >
           github.event_name == 'push' && github.ref == 'refs/heads/master' &&
           matrix.os == 'macos-latest' && matrix.nim == 'devel'
         uses: crazy-max/ghaction-github-pages@v2.5.0
         with:
-          build_dir: cps/docs
+          build_dir: ci/docs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
