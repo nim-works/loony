@@ -1,0 +1,35 @@
+Node	loony/node.html#Node	node: Node	
+nodeCounter	loony/node.html#nodeCounter	node: nodeCounter	
+reclaimCounter	loony/node.html#reclaimCounter	node: reclaimCounter	
+recPathCounter	loony/node.html#recPathCounter	node: recPathCounter	
+enqCounter	loony/node.html#enqCounter	node: enqCounter	
+deqCounter	loony/node.html#deqCounter	node: deqCounter	
+enqPathCounter	loony/node.html#enqPathCounter	node: enqPathCounter	
+deqPathCounter	loony/node.html#deqPathCounter	node: deqPathCounter	
+echoDebugNodeCounter	loony/node.html#echoDebugNodeCounter	node: echoDebugNodeCounter()	
+debugNodeCounter	loony/node.html#debugNodeCounter.t,untyped	node: debugNodeCounter(body: untyped)	
+incDebugCounter	loony/node.html#incDebugCounter.t	node: incDebugCounter(): untyped	
+decDebugCounter	loony/node.html#decDebugCounter.t	node: decDebugCounter(): untyped	
+incReclaimCounter	loony/node.html#incReclaimCounter.t	node: incReclaimCounter(): untyped	
+incRecPathCounter	loony/node.html#incRecPathCounter.t	node: incRecPathCounter(): untyped	
+incEnqCounter	loony/node.html#incEnqCounter.t	node: incEnqCounter(): untyped	
+incDeqCounter	loony/node.html#incDeqCounter.t	node: incDeqCounter(): untyped	
+incEnqPathCounter	loony/node.html#incEnqPathCounter.t	node: incEnqPathCounter(): untyped	
+incDeqPathCounter	loony/node.html#incDeqPathCounter.t	node: incDeqPathCounter(): untyped	
+toNodePtr	loony/node.html#toNodePtr.t	node: toNodePtr(pt: uint | ptr Node): NodePtr	
+toNode	loony/node.html#toNode.t	node: toNode(pt: NodePtr | uint): Node	
+toUInt	loony/node.html#toUInt.t,Node	node: toUInt(node: var Node): uint	
+toUInt	loony/node.html#toUInt.t,ptr.Node	node: toUInt(nodeptr: ptr Node): uint	
+prepareElement	loony/node.html#prepareElement,T	node: prepareElement[T: ref](el: T): uint	
+fetchNext	loony/node.html#fetchNext.t,Node,MemoryOrder	node: fetchNext(node: Node; moorder: MemoryOrder = moAcquireRelease): NodePtr	
+fetchNext	loony/node.html#fetchNext.t,NodePtr,MemoryOrder	node: fetchNext(node: NodePtr; moorder: MemoryOrder = moAcquireRelease): NodePtr	
+fetchAddSlot	loony/node.html#fetchAddSlot.t,Node,uint16,uint,MemoryOrder	node: fetchAddSlot(t: Node; idx: uint16; w: uint;\n             moorder: MemoryOrder = moAcquireRelease): uint	
+compareAndSwapNext	loony/node.html#compareAndSwapNext.t,Node,uint,uint	node: compareAndSwapNext(t: Node; expect: var uint; swap: uint): bool	
+compareAndSwapNext	loony/node.html#compareAndSwapNext.t,NodePtr,uint,uint	node: compareAndSwapNext(t: NodePtr; expect: var uint; swap: uint): bool	
+`=destroy`	loony/node.html#=destroy,Node	node: `=destroy`(n: var Node)	
+deallocNode	loony/node.html#deallocNode,ptr.Node	node: deallocNode(n: ptr Node)	
+allocNode	loony/node.html#allocNode	node: allocNode(): ptr Node	
+allocNode	loony/node.html#allocNode,T	node: allocNode[T](pel: T): ptr Node	
+tryReclaim	loony/node.html#tryReclaim,Node,uint16	node: tryReclaim(node: var Node; start: uint16)	
+incrEnqCount	loony/node.html#incrEnqCount,Node,uint16	node: incrEnqCount(node: var Node; final: uint16 = 0)	
+incrDeqCount	loony/node.html#incrDeqCount,Node,uint16	node: incrDeqCount(node: var Node; final: uint16 = 0)	

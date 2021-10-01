@@ -1,0 +1,10 @@
+LoonyQueue	loony.html#LoonyQueue	loony: LoonyQueue	
+toStrTuple	loony.html#toStrTuple,TagPtr	loony: toStrTuple(tag: TagPtr): string	
+push	loony.html#push,LoonyQueue[T],T	loony: push[T](queue: LoonyQueue[T]; el: T)	
+unsafePush	loony.html#unsafePush,LoonyQueue[T],T	loony: unsafePush[T](queue: LoonyQueue[T]; el: T)	
+isEmpty	loony.html#isEmpty,LoonyQueue	loony: isEmpty(queue: LoonyQueue): bool	
+pop	loony.html#pop,LoonyQueue[T]	loony: pop[T](queue: LoonyQueue[T]): T	
+unsafePop	loony.html#unsafePop,LoonyQueue[T]	loony: unsafePop[T](queue: LoonyQueue[T]): T	
+initLoonyQueue	loony.html#initLoonyQueue,LoonyQueue	loony: initLoonyQueue(q: LoonyQueue)	
+initLoonyQueue	loony.html#initLoonyQueue	loony: initLoonyQueue[T](): LoonyQueue[T]	
+newLoonyQueue	loony.html#newLoonyQueue	loony: newLoonyQueue[T](): LoonyQueue[T]	

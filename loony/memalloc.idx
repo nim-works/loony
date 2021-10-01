@@ -1,0 +1,3 @@
+allocAligned	loony/memalloc.html#allocAligned,Natural,Natural	memalloc: allocAligned(size, align: Natural): pointer	
+allocAligned0	loony/memalloc.html#allocAligned0,Natural,Natural	memalloc: allocAligned0(size, align: Natural): pointer	
+deallocAligned	loony/memalloc.html#deallocAligned,pointer,int	memalloc: deallocAligned(p: pointer; align: int)	

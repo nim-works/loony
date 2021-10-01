@@ -1,0 +1,25 @@
+UNINIT	loony/spec.html#UNINIT	spec: UNINIT	
+RESUME	loony/spec.html#RESUME	spec: RESUME	
+WRITER	loony/spec.html#WRITER	spec: WRITER	
+READER	loony/spec.html#READER	spec: READER	
+CONSUMED	loony/spec.html#CONSUMED	spec: CONSUMED	
+SLOT	loony/spec.html#SLOT	spec: SLOT	
+DEQ	loony/spec.html#DEQ	spec: DEQ	
+ENQ	loony/spec.html#ENQ	spec: ENQ	
+N	loony/spec.html#N	spec: N	
+TAGBITS	loony/spec.html#TAGBITS	spec: TAGBITS	
+NODEALIGN	loony/spec.html#NODEALIGN	spec: NODEALIGN	
+TAGMASK	loony/spec.html#TAGMASK	spec: TAGMASK	
+PTRMASK	loony/spec.html#PTRMASK	spec: PTRMASK	
+SHIFT	loony/spec.html#SHIFT	spec: SHIFT	
+MASK	loony/spec.html#MASK	spec: MASK	
+SLOTMASK	loony/spec.html#SLOTMASK	spec: SLOTMASK	
+NodePtr	loony/spec.html#NodePtr	spec: NodePtr	
+TagPtr	loony/spec.html#TagPtr	spec: TagPtr	
+ControlMask	loony/spec.html#ControlMask	spec: ControlMask	
+ControlBlock	loony/spec.html#ControlBlock	spec: ControlBlock	
+getHigh	loony/spec.html#getHigh,ControlMask	spec: getHigh(mask: ControlMask): uint16	
+getLow	loony/spec.html#getLow,ControlMask	spec: getLow(mask: ControlMask): uint16	
+fetchAddTail	loony/spec.html#fetchAddTail,ControlBlock,uint32,MemoryOrder	spec: fetchAddTail(ctrl: var ControlBlock; v: uint32 = 1;\n             moorder: MemoryOrder = moRelease): ControlMask	
+fetchAddHead	loony/spec.html#fetchAddHead,ControlBlock,uint32,MemoryOrder	spec: fetchAddHead(ctrl: var ControlBlock; v: uint32 = 1;\n             moorder: MemoryOrder = moRelease): ControlMask	
+fetchAddReclaim	loony/spec.html#fetchAddReclaim,ControlBlock,uint8,MemoryOrder	spec: fetchAddReclaim(ctrl: var ControlBlock; v: uint8 = 1;\n                moorder: MemoryOrder = moAcquireRelease): uint8	
