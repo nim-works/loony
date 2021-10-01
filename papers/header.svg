@@ -70,14 +70,9 @@
 						0 12px 5px rgba(0, 0, 0, 0.1);
 					animation: rotate ease-in-out 1s infinite alternate;
 				}
-				p {
-					font-size: 20px;
-					text-shadow: 0 1px 0 #efefef;
-					animation: 5s ease 0s normal forwards 1 fadeIn;
-				}
 			</style>
 			<div class="container">
-				<h1>LOONY<br/></h1>
+				<h1>LOONY</h1>
 			</div>
 		</div>
 	</foreignObject>
