@@ -1,4 +1,3 @@
-# Loony
 
 <div align="center">
 	<br>
@@ -6,13 +5,14 @@
 		<img src="papers/header.svg" width="100%" height="200px" alt="Loony">
 	</a>
 	<br>
-</div>
 
 [![Test Matrix](https://github.com/disruptek/cps/workflows/CI/badge.svg)](https://github.com/shayanhabibi/loony/actions?query=workflow%3ACI)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shayanhabibi/loony?style=flat)](https://github.com/shayanhabibi/loony/releases/latest)
 ![Minimum supported Nim version](https://img.shields.io/badge/nim-1.5.1%2B-informational?style=flat&logo=nim)
 [![License](https://img.shields.io/github/license/shayanhabibi/loony?style=flat)](#license)
+</div>
 
+<!-- # Loony -->
 >*"Don't let me block you" - Araq*
 >
 >*"We didn't have a good story about migrating continuations between threads." - Disruptek*
@@ -39,7 +39,7 @@ Enter **Loony**
 Loony is a 100% Nim-lang implementation of the algorithm depicted by Giersch & Nolte in ["Fast
 and Portable Concurrent FIFO Queues With Deterministic Memory Reclamation"](papers/GierschEtAl.pdf).
 
-The algorithm was chosen to help progress the concurrency story of [CPS](https://github.com/disruptek/cps) for which this was bespokingly made.
+The algorithm was chosen to help progress the concurrency story of [CPS](https://github.com/nim-works/cps) for which this was bespokingly made.
 
 After adapting the algorithm to nim CPS, disruptek adapted the queue for **any ref object** and was instrumental in ironing out the bugs and improving the performance of Loony.
 
@@ -49,7 +49,7 @@ After adapting the algorithm to nim CPS, disruptek adapted the queue for **any r
 >- Lock-free consumption by up to **32,255** threads
 >- Lock-free production by up to **64,610** threads
 >
-> You can use `-d:LoonyNodeAlignment=16` or whatever alignment you wish to adjust the contention capacity.
+> You can use `-d:loonyNodeAlignment=16` or whatever alignment you wish to adjust the contention capacity.
 
 With the 11 bit aligned implementation we have:
 - Lock-free consumption up to **512** threads
@@ -129,9 +129,9 @@ debugNodeCounter:
 
 We recommend against changing these values unless you know what you are doing. The suggested max alignment is 16 to achieve drastically higher contention capacities. Compilation will fail if your alignment does not fit the slot count index.
 
-`-d:LoonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
+`-d:loonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
 
-`-d:LoonySlotCount=1024` - Adjust the number of slots in each node
+`-d:loonySlotCount=1024` - Adjust the number of slots in each node
 
 ## Benchmarks
 
@@ -143,4 +143,4 @@ TBD
 
 ## What are Continuations?
 
-If you've somehow missed the next big thing for nim; see [CPS](https://github.com/disruptek/cps)
+If you've somehow missed the next big thing for nim; see [CPS](https://github.com/nim-works/cps)
