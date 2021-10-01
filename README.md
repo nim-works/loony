@@ -1,4 +1,13 @@
 # Loony
+
+<div align="center">
+	<br>
+	<a href="https://github.com/nim-works/loony">
+		<img src="papers/header.svg" width="800" height="200" alt="Loony">
+	</a>
+	<br>
+</div>
+
 [![Test Matrix](https://github.com/disruptek/cps/workflows/CI/badge.svg)](https://github.com/shayanhabibi/loony/actions?query=workflow%3ACI)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shayanhabibi/loony?style=flat)](https://github.com/shayanhabibi/loony/releases/latest)
 ![Minimum supported Nim version](https://img.shields.io/badge/nim-1.5.1%2B-informational?style=flat&logo=nim)
@@ -69,12 +78,12 @@ Then:
 ```nim
 import pkg/loony
 
-type AnyRefObject = ref object
+type TestRef = ref object
 
-let loonyQueue = newLoonyQueue[AnyRefObject]()
-# loony queue is a ref object itself
+let loonyQueue = newLoonyQueue[TestRef]()
+# Loony takes reference pointers and sends them safely!
 
-var aro = new AnyRefObject
+var aro = new TestRef
 
 loonyQueue.push aro
 # Enqueue objects onto the queue
