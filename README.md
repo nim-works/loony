@@ -3,7 +3,7 @@
 <div align="center">
 	<br>
 	<a href="https://github.com/nim-works/loony">
-		<img src="papers/header.svg" width="800" height="200" alt="Loony">
+		<img src="papers/header.svg" width="100%" height="200px" alt="Loony">
 	</a>
 	<br>
 </div>
