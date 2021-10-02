@@ -1,5 +1,4 @@
 import loony
-import pkg/cps
 
 import std/atomics
 
@@ -83,7 +82,3 @@ proc resume*[T, F](ward: Ward[T, F]): bool =
       result = false
   else:
     raise newException(ValueError, "Ward requires the pausable flag")
-
-let looq = newLoonyQueue[Continuation]()
-let ward = newWard(looq, {Pausable})
-discard pop ward
