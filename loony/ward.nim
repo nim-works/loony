@@ -1,11 +1,12 @@
-import loony
+import loony/spec {.all.}
+import loony/node {.all.}
+import loony {.all.}
 
 import std/atomics
 import std/setutils
 
 type
   WardFlag* {.size: sizeof(uint16).} = enum
-    None        = "Zero"
     PopPausable = "popping off the queue with this ward can be paused"
     PushPausable= "pushing onto the queue with this ward can be paused"
     Clearable   = "this ward is capable of clearing the queue"
@@ -19,29 +20,28 @@ type
   Ward*[T; F: static[uint16]] = ref WardObj[T, F]
 
 
-converter toUInt16*(flags: set[WardFlag]): WardFlags =
+converter toWardFlags*(flags: set[WardFlag]): WardFlags =
   # The vm cannot cast between set and integers
   when nimvm:
     for flag in items(flags):
       block:
         if flag == Pausable:
-          result = `or`(result, 1'u16 shl PopPausable.ord)
-          result = `or`(result, 1'u16 shl PushPausable.ord)
-        result = `or`(result, 1'u16 shl flag.ord)
-      if flags.contains(PopPausable) and
-          flags.contains(PushPausable) and
-          not flags.contains(Pausable):
-        result = `or`(result, 1'u16 shl Pausable.ord)
+          result = result or (1'u16 shl PopPausable.ord)
+          result = result or (1'u16 shl PushPausable.ord)
+        result = result or (1'u16 shl flag.ord)
+      if PopPausable in flags and
+          PushPausable in flags and
+          not (Pausable in flags):
+        result = result or (1'u16 shl Pausable.ord)
 
   else:
     result = cast[uint16](flags)
-    if flags.contains(PopPausable) and
-        flags.contains(PushPausable) and
-        not flags.contains(Pausable):
-      result = `or`(result, 1'u16 shl Pausable.ord)
+    if PopPausable in flags and
+        PushPausable in flags and
+        not (Pausable in flags):
+      result = result or (1'u16 shl Pausable.ord)
     if flags.contains Pausable:
-      result = `or`(result, cast[uint16]({PopPausable, PushPausable}))
-
+      result = result or (cast[uint16]({PopPausable, PushPausable}))
 
 converter toFlags*(value: WardFlags): set[WardFlag] =
   # The vm cannot cast between integers and sets
@@ -63,7 +63,7 @@ proc init*(ward: Ward) =
 proc newWard*[T](lq: LoonyQueue[T],
                 flags: static set[WardFlag]): auto =
   ## Create a new ward for the queue with the flags given
-  result = Ward[T, toUInt16(flags)](queue: lq)
+  result = Ward[T, toWardFlags(flags)](queue: lq)
   init result
 
 proc newWard*[T, F](wd: Ward[T, F],
@@ -73,167 +73,142 @@ proc newWard*[T, F](wd: Ward[T, F],
   ## This can be used to create a ward for instance that will respond to
   ## poppauses only. If the other ward is paused for both pop and push, this ward
   ## will only respect the poppause.
-  result = Ward[T, toUInt16(flags)](queue: wd.queue, values: wd.values)
+  result = Ward[T, toWardFlags(flags)](queue: wd.queue, values: wd.values)
+
+template isFlagOn(ward: Ward, flag: WardFlag): bool =
+  when flag in ward.flags:
+    `and`(ward.values.load(moAcquire), {flag}) > 0'u16
+  else:
+    false
 
 proc push*[T, F](ward: Ward[T, F], el: T): bool =
-  block push:
-    when ward.flags.contains PushPausable:
-      if `and`(ward.values.load(moAcquire), {PushPausable}) > 0'u16:
-        result = false
-        break push
-    ward.queue.push T
+  if not ward.isFlagOn PushPausable:
+    ward.queue.push el
     result = true
-
 proc unsafePush*[T, F](ward: Ward[T, F], el: T): bool =
-  block push:
-    when ward.flags.contains PushPausable:
-      if `and`(ward.values.load(moAcquire), {PushPausable}) > 0'u16:
-        result = false
-        break push
-    ward.queue.unsafePush T
+  if not ward.isFlagOn PushPausable:
+    ward.queue.unsafePush el
     result = true
 
 proc pop*[T, F](ward: Ward[T, F]): T =
-  block pop:
-    when ward.flags.contains PopPausable:
-      # At the moment this being the only flag to be cautious
-      # of means we can just check for any bit set in the flag vals
-      if `and`(ward.values.load(moAcquire), {PopPausable}) > 0'u16:
-        break pop
-      # Do a atomic pause check here
-    result = ward.queue.pop()
-
+  if not ward.isFlagOn PopPausable:
+    ward.queue.pop()
 proc unsafePop*[T, F](ward: Ward[T, F]): T =
-  block pop:
-    when ward.flags.contains PopPausable:
-      if `and`(ward.values.load(moAcquire), {PopPausable}) > 0'u16:
-        break pop
-    result = ward.queue.unsafePop()
+  if not ward.isFlagOn PopPausable:
+    ward.queue.unsafePop()
 
 
+template pauseImpl*[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
+  when flags.intersection ward.flags == flags:
+    if `and`(ward.values.fetchOr(flags, moRelease), flags) > 0'u16:
+      true
+    else:
+      false
+  else:
+    raise ValueError.newException:
+      "You require this flag on the ward: " & $flags
+template resumeImpl*[T, F](ward: Ward[T, F], flag: set[WardFlag]): bool =
+  when flags.intersection ward.flags == flags:
+    if `and`(ward.values.fetchAnd(complement flags, moRelease), flags) > 0'u16:
+      true
+    else:
+      false
+  else:
+    raise ValueError.newException:
+      "You require this flag on the ward: " & $flags
 # These pause functions will only stop ward access that have not yet begun.
 # This must be kept in mind when considering activity on the queue else.
 proc pause*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains Pausable:
-    if `and`(ward.values.fetchOr({PopPausable, PushPausable}, moRelease),
-            {PopPausable, PushPausable}) > 0'u16:
-      # The ward has now been paused
-      result = true
-    else:
-      # The ward was already paused
-      result = false
-  elif ward.flags.contains PushPausable:
-    raise newException(ValueError,
-                      "Have to use pausePush unless the Pausable flag is used")
-  elif ward.flags.contains PopPausable:
-    raise newException(ValueError,
-                      "Have to use pausePop unless the Pausable flag is used")
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pausable flag")
-
+  ward.pauseImpl {PushPausable, PopPausable}
 proc pausePush*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PushPausable:
-    if `and`(ward.values.fetchOr({PushPausable}, moRelease), {PushPausable}) > 0'u16:
-      # The ward pushes are now paused
-      result = true
-    else:
-      # The pushes were already paused
-      result = false
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pushpausable or pausable flag")
-
+  ward.pauseImpl {PushPausable}
 proc pausePop*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PopPausable:
-    if `and`(ward.values.fetchOr({PopPausable}, moRelease), {PopPausable}) > 0'u16:
-      # The ward pops are now paused
-      result = true
-    else:
-      # The pops were already paused
-      result = false
-  else:
-    raise newException(ValueError,
-                      "Ward requires the poppausable or pausable flag")
-
+  ward.pauseImpl {PopPausable}
 proc resume*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains Pausable:
-    if `and`(ward.values.fetchAnd(complement({PushPausable, PopPausable}), moRelease),
-            {PushPausable, PopPausable}) > 0'u16:
-      # The ward is now resumed
-      result = true
-    else:
-      # The ward was not paused
-      result = false
-  elif ward.flags.contains PushPausable:
-    raise newException(ValueError,
-                      "Have to use resumePush unless the Pausable flag is used")
-  elif ward.flags.contains PopPausable:
-    raise newException(ValueError,
-                      "Have to use resumePop unless the Pausable flag is used")
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pausable flag")
-
+  ward.resumeImpl {PushPausable, PopPausable}
 proc resumePush*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PushPausable:
-    if `and`(ward.values.fetchAnd(complement({PushPausable}), moRelease),
-            {PushPausable}) > 0'u16:
-      # The ward is now resumed
-      result = true
-    else:
-      # The ward was not paused
-      result = false
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pausable or pushpausable flag")
-
+  ward.resumeImpl {PushPausable}
 proc resumePop*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PopPausable:
-    if `and`(ward.values.fetchAnd(complement({PopPausable}), moRelease),
-            {PopPausable}) > 0'u16:
-      # The ward is now resumed
-      result = true
-    else:
-      # The ward was not paused
-      result = false
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pausable or poppausable flag")
+  ward.resumeImpl {PopPausable}
 
-template isImpl(ward: Ward, flags: set[WardFlag]): bool =
-  `and`(ward.values.load(), moRelaxed, flags) == falgs
+template isImpl[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
+  when flags.intersection ward.flags == flags:
+    if `and`(ward.values.load(moRelaxed), flags) == flags:
+      result = true
+  else:
+    raise ValueError.newException:
+      "You require this flag on the ward: " & $flags
 
 proc isPaused*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains Pausable:
-    if ward.isImpl {PopPausable, PushPausable}:
-      result = true
-  elif ward.flags.contains PushPausable:
-    raise newException(ValueError,
-                      "Have to use isPausedPush unless the Pausable flag is used")
-  elif ward.flags.contains PopPausable:
-    raise newException(ValueError,
-                      "Have to use isPausedPop unless the Pausable flag is used")
-  else:
-    raise newException(ValueError,
-                      "Ward requires the pausable flag")
-    discard
-  
+  ward.isImpl {PushPausable, PopPausable}
 proc isPausedPop*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PopPausable:
-    if ward.isImpl {PopPausable}:
-      result = true
-  else:
-    raise newException(ValueError,
-                      "This ward does not have the PopPausable or Pausable flags set")
-                      
+  ward.isImpl {PopPausable}
 proc isPausedPush*[T, F](ward: Ward[T, F]): bool =
-  when ward.flags.contains PushPausable:
-    if ward.isImpl {PushPausable}:
-      result = true
-  else:
-    raise newException(ValueError,
-                      "This ward does not have the PushPausable or Pausable flags set")
+  ward.isImpl {PushPausable}
+
+proc clearImpl[T](queue: LoonyQueue[T]) =
+  var newNode = allocNode()
+  # load the tail
+  var currTail = queue.fetchTail()
+  # Load the tails next node
+  var tailNext = currTail.node.fetchNext()
+  # New nodes will not have the next node set
+  # If it has been set then the queue is in the process of having
+  # the tail changed and we will continuosly load it until we get the nil next
+  while not cast[ptr Node](tailNext).isNil():
+    currTail = queue.fetchTail()
+    tailNext = currTail.node.fetchNext()
+  # We will replace the tails next node with our newNode. This ensures any ops
+  # that were about to try and set a new node are prevented and will instead
+  # help us to add our new node
+  while not currTail.node.compareAndSwapNext(tailNext, newNode):
+    # If it doesnt work then we must have just been beaten to it, load the next
+    # node and swap that instead
+    currTail = queue.fetchTail()
+  # TODO I feel that I have to ensure that if I run into the situation where I have
+  # intercepted threads setting new nodes, that memory reclamation occurs as it should
+  
+  # Now I will swap the queues current tail with the new tail that we set.
+  # If it doesn't work its probably because another thread did a pop and changed
+  # the index so I will keep increasing the currTail index until it is successful
+  # REVIEW I might just do a store at this point instead of a CAS
+  while not queue.compareAndSwapTail(currTail, newNode):
+    currTail += 1
+  # Get the head node
+  var head = queue.fetchHead()
+  # We will try straight up swap the head node with our new node
+  while not queue.compareAndSwapHead(head, newNode):
+    # Keep updating the head node till it works
+    head = queue.fetchHead()
+    # TODO will have to do a check here to see if the head is
+    # the same as our newNode in which case can just stop
+  
+  # Now we can begin clearing the nodes
+  block done:
+    while true:
+      # Check if the head is the same as our newNode in which
+      # case we have already cleared all the previous nodes and
+      # deallocated them
+      if head.nptr == newNode.nptr:
+        break done
+      for i in 0..<N:
+        # For every slot in the heads slot, load the value
+        var slot = head.node.slots[i].load(moRelaxed)
+        # If the slot has been consumed then we will move on (its already been derefd)
+        if not (slot and CONSUMED):
+          # Slot hasnt been consumed so we will load it
+          var el = cast[T](slot and SLOTMASK)
+          # If slot is not a nil ref then we will unref it
+          if not el.isNil:
+            GC_unref el
+      # After unrefing the slots, we will load the next node in the list
+      var dehead = deepCopy(head)
+      head = head.node.fetchNext()
+      # Deallocate the consumed node
+      deallocNode(dehead.nptr)
+      
+  # and now hopefully  nothing bad happens.
+
 
 proc clear*[T, F](ward: Ward[T, F]) =
   when ward.flags.contains Clearable:
