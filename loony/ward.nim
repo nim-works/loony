@@ -14,10 +14,10 @@ type
     Pausable    = "accessing the queue with this ward can be paused" # Keep this flag on the end
     # This flag will automatically infer PopPausable and PushPausable.
   WardFlags* = uint16
-  WardObj[T; F: static[uint16]] = object
+
+  Ward*[T; F: static[uint16]] = ref object
     queue: LoonyQueue[T]
     values: Atomic[uint16]
-  Ward*[T; F: static[uint16]] = ref WardObj[T, F]
 
 
 converter toWardFlags*(flags: set[WardFlag]): WardFlags =
@@ -141,9 +141,9 @@ template isImpl[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
 
 proc isPaused*[T, F](ward: Ward[T, F]): bool =
   ward.isImpl {PushPausable, PopPausable}
-proc isPausedPop*[T, F](ward: Ward[T, F]): bool =
+proc isPopPaused*[T, F](ward: Ward[T, F]): bool =
   ward.isImpl {PopPausable}
-proc isPausedPush*[T, F](ward: Ward[T, F]): bool =
+proc isPushPaused*[T, F](ward: Ward[T, F]): bool =
   ward.isImpl {PushPausable}
 
 proc clearImpl[T](queue: LoonyQueue[T]) =
@@ -211,8 +211,25 @@ proc clearImpl[T](queue: LoonyQueue[T]) =
 
 
 proc clear*[T, F](ward: Ward[T, F]) =
-  when ward.flags.contains Clearable:
+  when Clearable in ward.flags:
     ward.queue.clearImpl()
   else:
-    raise newException(ValueError,
-                      "This ward does not have the Clearable flag set")
+    raise ValueError.newException:
+      "This ward does not have the Clearable flag set"
+
+proc countImpl[T](queue: LoonyQueue[T]): int =
+  var head = queue.fetchHead()
+  var nodes: int
+  var andysBalls: TagPtr = head
+  while true:
+    andysBalls = andysBalls.node.next.load(moRelaxed)
+    if andysBalls == 0'u:
+      break
+    inc nodes
+  var (currHead, currTail) = queue.maneAndTail()
+  if not currHead.nptr == head.nptr:
+    dec nodes
+  result = nodes * N + (N - currHead.idx) + currTail.idx
+
+proc count[T, F](ward: Ward[T, F]) =
+  countImpl ward.queue
