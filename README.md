@@ -94,15 +94,17 @@ var el = loonyQueue.pop
 # unsafePop is available, see MemorySafety & Cache Coherance below!
 ```
 
-#### Memory Safety & Cache Coherance
+## Documentation
 
-Loonys standard Push and Pop operations offer a good level of cache coherancy
-automatically using sync primitives such as atomic_thread_fence. Atomic thread
-fences ensure a CPUs store buffer is committed on the push operation and read
-on the pop operation. This is a higher cost primitive; those who know what
-they are doing can use `unsafePush` and `unsafePop` instead; this will provide
-the speed and functionality of loony as it originally was without the cache
-coherance primitive cost added ontop.
+[The full API documentation is kept up-to-date on GitHub.](https://nim-works.github.io/loony/loony.html)
+
+#### Memory Safety & Cache Coherence
+
+Loony's standard `push` and `pop` operations offer cache coherency by using
+primitives such as `atomic_thread_fence` to ensure a CPU's store buffer is
+committed on the push operation and read on the pop operation; this is a
+higher-cost primitive. You can use `unsafePush` and `unsafePop` to manipulate
+a `LoonyQueue` without regard to cache coherency for ultimate performance.
 
 ### Debugging
 
@@ -132,14 +134,6 @@ We recommend against changing these values unless you know what you are doing. T
 `-d:loonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
 
 `-d:loonySlotCount=1024` - Adjust the number of slots in each node
-
-## Benchmarks
-
-TBD
-
-## Current State
-
-*"It works" - Disruptek*
 
 ## What are Continuations?
 
