@@ -1,4 +1,3 @@
-# Loony
 
 <div align="center">
 	<br>
@@ -6,13 +5,14 @@
 		<img src="papers/header.svg" width="800" height="200" alt="Loony">
 	</a>
 	<br>
-</div>
 
 [![Test Matrix](https://github.com/disruptek/cps/workflows/CI/badge.svg)](https://github.com/shayanhabibi/loony/actions?query=workflow%3ACI)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shayanhabibi/loony?style=flat)](https://github.com/shayanhabibi/loony/releases/latest)
 ![Minimum supported Nim version](https://img.shields.io/badge/nim-1.5.1%2B-informational?style=flat&logo=nim)
 [![License](https://img.shields.io/github/license/shayanhabibi/loony?style=flat)](#license)
+</div>
 
+<!-- # Loony -->
 >*"Don't let me block you" - Araq*
 >
 >*"We didn't have a good story about migrating continuations between threads." - Disruptek*
@@ -132,7 +132,6 @@ debugNodeCounter:
 We recommend against changing these values unless you know what you are doing. The suggested max alignment is 16 to achieve drastically higher contention capacities. Compilation will fail if your alignment does not fit the slot count index.
 
 `-d:loonyNodeAlignment=11` - Adjust node alignment to increase/decrease contention capacity
-
 `-d:loonySlotCount=1024` - Adjust the number of slots in each node
 
 ## What are Continuations?

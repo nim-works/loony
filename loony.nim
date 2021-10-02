@@ -91,6 +91,7 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
                                 swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
+
 # Both enqueue and dequeue enter FAST PATH operations 99% of the time,
 # however in cases we enter the SLOW PATH operations represented in both
 # enq and deq by advTail and advHead respectively.
