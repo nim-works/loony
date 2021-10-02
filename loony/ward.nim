@@ -231,5 +231,5 @@ proc countImpl[T](queue: LoonyQueue[T]): int =
     dec nodes
   result = nodes * N + (N - currHead.idx) + currTail.idx
 
-proc count[T, F](ward: Ward[T, F]) =
+proc count*[T, F](ward: Ward[T, F]) =
   countImpl ward.queue
