@@ -91,6 +91,73 @@ template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | Ta
 template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
                                 swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
+
+proc clearImpl*[T](queue: LoonyQueue[T]) =
+  ## This is used internally by the Ward objects. The queue
+  ## should only be cleared using that object. However, there
+  ## is no harm necessarily with using this procedure directly atm.
+  var newNode = allocNode()
+  # load the tail
+  var currTail = queue.fetchTail()
+  # Load the tails next node
+  var tailNext = currTail.node.fetchNext()
+  # New nodes will not have the next node set
+  # If it has been set then the queue is in the process of having
+  # the tail changed and we will continuosly load it until we get the nil next
+  while not cast[ptr Node](tailNext).isNil():
+    currTail = queue.fetchTail()
+    tailNext = currTail.node.fetchNext()
+  # We will replace the tails next node with our newNode. This ensures any ops
+  # that were about to try and set a new node are prevented and will instead
+  # help us to add our new node
+  while not currTail.node.compareAndSwapNext(tailNext, newNode):
+    # If it doesnt work then we must have just been beaten to it, load the next
+    # node and swap that instead
+    currTail = queue.fetchTail()
+  # TODO I feel that I have to ensure that if I run into the situation where I have
+  # intercepted threads setting new nodes, that memory reclamation occurs as it should
+  
+  # Now I will swap the queues current tail with the new tail that we set.
+  # If it doesn't work its probably because another thread did a pop and changed
+  # the index so I will keep increasing the currTail index until it is successful
+  # REVIEW I might just do a store at this point instead of a CAS
+  while not queue.compareAndSwapTail(currTail, newNode):
+    currTail += 1
+  # Get the head node
+  var head = queue.fetchHead()
+  # We will try straight up swap the head node with our new node
+  while not queue.compareAndSwapHead(head, newNode):
+    # Keep updating the head node till it works
+    head = queue.fetchHead()
+    # TODO will have to do a check here to see if the head is
+    # the same as our newNode in which case can just stop
+  
+  # Now we can begin clearing the nodes
+  block done:
+    while true:
+      # Check if the head is the same as our newNode in which
+      # case we have already cleared all the previous nodes and
+      # deallocated them
+      if head.nptr == newNode.nptr:
+        break done
+      for i in 0..<N:
+        # For every slot in the heads slot, load the value
+        var slot = head.node.slots[i].load(moRelaxed)
+        # If the slot has been consumed then we will move on (its already been derefd)
+        if not (slot and CONSUMED):
+          # Slot hasnt been consumed so we will load it
+          var el = cast[T](slot and SLOTMASK)
+          # If slot is not a nil ref then we will unref it
+          if not el.isNil:
+            GC_unref el
+      # After unrefing the slots, we will load the next node in the list
+      var dehead = deepCopy(head)
+      head = head.node.fetchNext()
+      # Deallocate the consumed node
+      deallocNode(dehead.nptr)
+      
+  # and now hopefully  nothing bad happens.
+
 # Both enqueue and dequeue enter FAST PATH operations 99% of the time,
 # however in cases we enter the SLOW PATH operations represented in both
 # enq and deq by advTail and advHead respectively.

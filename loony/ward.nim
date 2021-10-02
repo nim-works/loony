@@ -237,7 +237,7 @@ proc isPausedPush*[T, F](ward: Ward[T, F]): bool =
 
 proc clear*[T, F](ward: Ward[T, F]) =
   when ward.flags.contains Clearable:
-    discard # Do the things here
+    ward.queue.clearImpl()
   else:
     raise newException(ValueError,
                       "This ward does not have the Clearable flag set")
