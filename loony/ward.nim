@@ -110,6 +110,9 @@ proc unsafePop*[T, F](ward: Ward[T, F]): T =
         break pop
     result = ward.queue.unsafePop()
 
+
+# These pause functions will only stop ward access that have not yet begun.
+# This must be kept in mind when considering activity on the queue else.
 proc pause*[T, F](ward: Ward[T, F]): bool =
   when ward.flags.contains Pausable:
     if `and`(ward.values.fetchOr({PopPausable, PushPausable}, moRelease),
@@ -197,3 +200,44 @@ proc resumePop*[T, F](ward: Ward[T, F]): bool =
   else:
     raise newException(ValueError,
                       "Ward requires the pausable or poppausable flag")
+
+template isImpl(ward: Ward, flags: set[WardFlag]): bool =
+  `and`(ward.values.load(), moRelaxed, flags) == falgs
+
+proc isPaused*[T, F](ward: Ward[T, F]): bool =
+  when ward.flags.contains Pausable:
+    if ward.isImpl {PopPausable, PushPausable}:
+      result = true
+  elif ward.flags.contains PushPausable:
+    raise newException(ValueError,
+                      "Have to use isPausedPush unless the Pausable flag is used")
+  elif ward.flags.contains PopPausable:
+    raise newException(ValueError,
+                      "Have to use isPausedPop unless the Pausable flag is used")
+  else:
+    raise newException(ValueError,
+                      "Ward requires the pausable flag")
+    discard
+  
+proc isPausedPop*[T, F](ward: Ward[T, F]): bool =
+  when ward.flags.contains PopPausable:
+    if ward.isImpl {PopPausable}:
+      result = true
+  else:
+    raise newException(ValueError,
+                      "This ward does not have the PopPausable or Pausable flags set")
+                      
+proc isPausedPush*[T, F](ward: Ward[T, F]): bool =
+  when ward.flags.contains PushPausable:
+    if ward.isImpl {PushPausable}:
+      result = true
+  else:
+    raise newException(ValueError,
+                      "This ward does not have the PushPausable or Pausable flags set")
+
+proc clear*[T, F](ward: Ward[T, F]) =
+  when ward.flags.contains Clearable:
+    discard # Do the things here
+  else:
+    raise newException(ValueError,
+                      "This ward does not have the Clearable flag set")
