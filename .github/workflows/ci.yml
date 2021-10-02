@@ -5,7 +5,7 @@ on:
 
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
       - '*'
@@ -37,7 +37,6 @@ jobs:
               - '**.nimble'
               - 'tests/**'
               - '.github/workflows/ci.yml'
-
   build:
     # Build if the files we care about are changed.
     needs: changes
@@ -52,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['macos-latest', 'ubuntu-latest', 'windows-latest']
+        os: ['macos-latest', 'ubuntu-latest']
         nim: ['devel', 'version-1-6']
     name: '${{ matrix.os }} (${{ matrix.nim }})'
     runs-on: ${{ matrix.os }}
@@ -74,7 +73,6 @@ jobs:
           cd ci
           nimble --accept develop
           nimble test
-
       - name: Build docs
         if: ${{ matrix.docs }} == 'true'
         shell: bash
@@ -89,10 +87,9 @@ jobs:
             loony.nim
           # Ignore failures for older Nim
           cp docs/{the,}index.html || true
-
       - name: Publish docs
         if: >
-          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/master' &&
           matrix.os == 'macos-latest' && matrix.nim == 'devel'
         uses: crazy-max/ghaction-github-pages@v2.5.0
         with:
