@@ -86,6 +86,11 @@ jobs:
             "--git.devel:$branch" \
             loony.nim
           # Ignore failures for older Nim
+          nim doc --outdir:docs --path="." \
+            '--git.url:https://github.com/${{ github.repository }}' \
+            '--git.commit:${{ github.sha }}' \
+            "--git.devel:$branch" \
+            loony/ward.nim 
           cp docs/{the,}index.html || true
       - name: Publish docs
         if: >
