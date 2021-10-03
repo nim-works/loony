@@ -103,7 +103,7 @@ tests and further documentation are to follow when time allows.
 
 [The full API documentation is kept up-to-date on GitHub.](https://nim-works.github.io/loony/loony.html)
 
-[The API documentation for the Ward submodule is found here.](https://nim-works.github.io/loony/ward.html)
+[The API documentation for the Ward submodule is found here.](https://nim-works.github.io/loony/loony/ward.html)
 
 #### Memory Safety & Cache Coherence
 
