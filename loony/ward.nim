@@ -39,6 +39,7 @@ type
 
 
 converter toWardFlags*(flags: set[WardFlag]): WardFlags =
+  ## Internal use
   # The vm cannot cast between set and integers
   when nimvm:
     for flag in items(flags):
@@ -62,6 +63,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
       result = result or (cast[uint16]({PopPausable, PushPausable}))
 
 converter toFlags*(value: WardFlags): set[WardFlag] =
+  ## Internal use
   # The vm cannot cast between integers and sets
   when nimvm:
     # Iterate over the values of ward flag

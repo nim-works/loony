@@ -57,6 +57,7 @@ With the 11 bit aligned implementation we have:
 - Memory-leak free under **ARC**
 - Can pass ANY ref object between threads; however:
   - Is perfectly designed for passing Continuations between threads
+- **0 memory copies**
 
 ## Issues
 
@@ -94,9 +95,15 @@ var el = loonyQueue.pop
 # unsafePop is available, see MemorySafety & Cache Coherance below!
 ```
 
+There is now a preliminary sublibrary which provides state managers called `Ward`'s.
+These can be imported with `import loony/ward`. The documentation is found below,
+tests and further documentation are to follow when time allows.
+
 ## Documentation
 
 [The full API documentation is kept up-to-date on GitHub.](https://nim-works.github.io/loony/loony.html)
+
+[The API documentation for the Ward submodule is found here.](https://nim-works.github.io/loony/ward.html)
 
 #### Memory Safety & Cache Coherence
 
