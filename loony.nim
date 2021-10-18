@@ -9,7 +9,7 @@ import loony/spec
 import loony/node
 
 export
-  node.echoDebugNodeCounter, node.debugNodeCounter  
+  node.echoDebugNodeCounter, node.debugNodeCounter
 # sprinkle some raise defect
 # raise Defect(nil) | yes i am the
 # raise Defect(nil) | salt bae of defects
@@ -155,7 +155,7 @@ proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
 
 
 
-    
+
 
 proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   if h.idx == N:
@@ -255,7 +255,7 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 proc push*[T](queue: LoonyQueue[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
-  ## 
+  ##
   ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherance = true)
 proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
@@ -310,8 +310,9 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # CPU to completely commit its STOREBUFFER
 
           result = cast[T](prev and SLOTMASK)
-          assert result != nil
-          GC_unref result
+          assert not result.isNil
+          when result is ref:
+            GC_unref result
           break
     else:
       # SLOW PATH OPS
@@ -324,7 +325,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
 proc pop*[T](queue: LoonyQueue[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
-  ## 
+  ##
   ## Use unsafePop to avoid this cost.
   popImpl(queue, forcedCoherance = true)
 proc unsafePop*[T](queue: LoonyQueue[T]): T =
