@@ -1,5 +1,5 @@
 ## Ward introduces a state management container for the LoonyQueue.
-## 
+##
 ## Principally, all interactions that you want to do with a LoonyQueue you
 ## can do through the ward ontop of any added behaviours you pass in as
 ## flags. This design separates added functionality from hampering the speed
@@ -7,10 +7,10 @@
 ## that access a loony queue with a Pausable flag will prefix the operation
 ## with an atomic check to see if the ward is paused (this is not blocking, you
 ## simply receive a nil in the case of pop operations and a false bool on push ops).
-## 
+##
 ## However, if you were to set only a PushPausable flag, then only the push operations
 ## will introduce the extra cost.
-## 
+##
 ## Wards are ref objects and can therefore share the same many-to-one relationship
 ## that you expect from LoonyQueue. You can have separate wards pointing to the same
 ## queue but with separate flags and flag switches. Or you can have separate wards
@@ -223,7 +223,7 @@ proc clearImpl[T](queue: LoonyQueue[T]) =
     currTail = queue.fetchTail()
   # TODO I feel that I have to ensure that if I run into the situation where I have
   # intercepted threads setting new nodes, that memory reclamation occurs as it should
-  
+
   # Now I will swap the queues current tail with the new tail that we set.
   # If it doesn't work its probably because another thread did a pop and changed
   # the index so I will keep increasing the currTail index until it is successful
@@ -238,7 +238,7 @@ proc clearImpl[T](queue: LoonyQueue[T]) =
     head = queue.fetchHead()
     # TODO will have to do a check here to see if the head is
     # the same as our newNode in which case can just stop
-  
+
   # Now we can begin clearing the nodes
   block done:
     while true:
@@ -255,14 +255,15 @@ proc clearImpl[T](queue: LoonyQueue[T]) =
           # Slot hasnt been consumed so we will load it
           var el = cast[T](slot and SLOTMASK)
           # If slot is not a nil ref then we will unref it
-          if not el.isNil:
-            GC_unref el
+          when T is ref:
+            if not el.isNil:
+              GC_unref el
       # After unrefing the slots, we will load the next node in the list
       var dehead = deepCopy(head)
       head = head.node.fetchNext()
       # Deallocate the consumed node
       deallocNode(dehead.nptr)
-      
+
   # and now hopefully  nothing bad happens.
 
 proc clear*[T, F](ward: Ward[T, F]) =

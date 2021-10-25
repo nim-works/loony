@@ -20,7 +20,7 @@ export
 # raise Defect(nil)
 
 type
-  LoonyQueue*[T: ref] = ref object
+  LoonyQueue*[T] = ref object
     head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
     tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
     currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr

@@ -29,7 +29,7 @@ when defined(loonyDebug):
   proc echoDebugNodeCounter*() =
     ## This will output the counter
     notice "Node counter: " & $nodeCounter.load()
-  
+
   template debugNodeCounter*(body: untyped) =
     let (initC, initRec, initRecP, initEnq, initDeq, initEnqP, initDeqP) =
           ( nodeCounter.load(), reclaimCounter.load(),
@@ -46,7 +46,7 @@ when defined(loonyDebug):
       notice "Aborted reclaim ops:            " & $(recPathCounter.load() - initRecP)
       notice "Unreclaimed Enq ops:            " & $(enqPathCounter.load() - initEnqP)
       notice "Unreclaimed Deq ops:            " & $(deqPathCounter.load() - initDeqP)
-  
+
   template incDebugCounter*(): untyped = discard   nodeCounter.fetchAdd(1, moRelaxed)
   template decDebugCounter*(): untyped = discard   nodeCounter.fetchSub(1, moRelaxed)
   template incReclaimCounter*(): untyped = discard reclaimCounter.fetchAdd(1, moRelaxed)
@@ -80,10 +80,11 @@ template toUInt*(nodeptr: ptr Node): uint =
   # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-proc prepareElement*[T: ref](el: T): uint =
+proc prepareElement*[T](el: T): uint =
   ## Prepare an item to be taken into the queue; we bump the RC first to
   ## ensure that no other operations free it, then add the WRITER bit.
-  GC_ref el
+  when T is ref:
+    GC_ref el
   result = cast[uint](el) or WRITER
 
 template fetchNext*(node: Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
