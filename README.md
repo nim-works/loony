@@ -65,6 +65,7 @@ With the 11 bit aligned implementation we have:
 
 ORC is not supported (See [Issue #4](https://github.com/shayanhabibi/loony/issues/4))
 
+Spawn (Nims `threadpool` module) is not supported. *It won't ever be; don't use spawn unless you are a masochist in general.*
 ## Installation
 
 Download with `nimble install loony` (CPS dependency for tests) or directly from the source.
