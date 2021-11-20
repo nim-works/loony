@@ -32,7 +32,7 @@ proc wait*[T](monitor: ptr T, compare: T) {.inline.} =
   # Returns 0 in case of a successful suspend
   # If value are different, it returns EWOULDBLOCK
   # We discard as this is not needed and simplifies compat with Windows futex
-  discard sysFutex(monitor, FutexWaitPrivate, compare)
+  discard sysFutex(monitor, FutexWaitPrivate, cast[cint](compare))
 
 proc wake*(monitor: pointer) {.inline.} =
   ## Wake one thread (from the same process)
