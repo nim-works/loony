@@ -133,15 +133,15 @@ proc unsafePush*[T, F](ward: Ward[T, F], el: T): bool =
     if not ward.isFlagOn PushPausable:
       ward.queue.unsafePush el
       result = true
-
+import cps
 proc pop*[T, F](ward: Ward[T, F]): T =
   ## Pop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
   when PoolWaiter in F:
     if not ward.isFlagOn PopPausable:
-      while result.isNil:
+      while not result.running:
         result = ward.queue.popImpl(true)
-        if result.isNil:
+        if not result.running:
           wait(ward.values.addr(), ward.values)
 
   else:

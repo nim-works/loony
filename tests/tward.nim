@@ -48,14 +48,22 @@ proc enqueue(c: C): C {.cpsMagic.} =
 
 var counter {.global.}: Atomic[int]
 
+import std/hashes
+
 # try to delay a reasonable amount of time despite platform
 when defined(windows):
   proc noop(c: C): C {.cpsMagic.} =
-    sleep:
-      when defined(danger) and false: # Reduce cont count on windows before adding sleep
-        1
-      else:
-        0 # 🤔
+    var i: int
+    # while true:
+    #   let v = hash i
+    #   if i == 300: break
+    #   inc i
+    # sleep:
+    #   when defined(danger) and false: # Reduce cont count on windows before adding sleep
+    #     1
+    #   else:
+    #     # 0
+    #     1 # 🤔
     c
 else:
   import posix
@@ -119,7 +127,7 @@ suite "loony":
           discard enqueue c
         checkpoint "queued $# continuations" % [ $continuationCount ]
         echo "passed 2"
-        sleep(10_000)
+        sleep(5_000)
         echo counter.load()
         for thread in threads.mitems:
           joinThread thread
