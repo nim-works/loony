@@ -207,7 +207,7 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
 # announce both operations completion (in case of a read) and also makes
 # determining the order in which two operations occured possible.
 
-proc pushImpl[T](queue: LoonyQueue[T], el: T,
+proc pushImpl[T](queue: LoonyQueue[T], el: var T,
                     forcedCoherance: static bool = false) =
   doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit
@@ -215,8 +215,9 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
   # primitive; it will be preferred while proving safety before working towards
   # optimisation by atomic reads/writes of cache lines related to el
-  when forcedCoherance:
-    atomicThreadFence(ATOMIC_RELEASE)
+  # when forcedCoherance:
+  #   atomicThreadFence(ATOMIC_RELEASE)
+  atomicThreadFence(ATOMIC_RELEASE)
   while true:
     # Enq proc begins with incr the index of node in TagPtr
     var tag = fetchIncTail(queue)
@@ -299,8 +300,8 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # Ideally before retrieving the ref object itself, we want to allow
           # CPUs to communicate cache line changes and resolve invalidations
           # to dirty memory.
-          when forcedCoherance:
-            atomicThreadFence(ATOMIC_ACQUIRE)
+          # when forcedCoherance:
+          atomicThreadFence(ATOMIC_ACQUIRE)
           # CPU halt and clear STOREBUFFER; overwritten cache lines will be
           # syncd and invalidated ensuring fresh memory from this point in line
           # with the PUSH operations atomicThreadFence(ATOMIC_RELEASE)

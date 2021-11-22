@@ -24,6 +24,7 @@ import loony/utils/futex
 
 import std/atomics
 import std/setutils
+import std/sets
 
 type
   WardFlag* {.size: sizeof(uint16).} = enum
@@ -47,7 +48,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
   when nimvm:
     for flag in items(flags):
       block:
-        if flag == Pausable:
+        if flag == Pausable or flag == PoolWaiter:
           result = result or (1'u16 shl PopPausable.ord)
           result = result or (1'u16 shl PushPausable.ord)
         result = result or (1'u16 shl flag.ord)
@@ -62,7 +63,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
         PushPausable in flags and
         not (Pausable in flags):
       result = result or (1'u16 shl Pausable.ord)
-    if flags.contains Pausable:
+    if flags.contains(Pausable) or flags.contains(PoolWaiter):
       result = result or (cast[uint16]({PopPausable, PushPausable}))
 
 converter toFlags*(value: WardFlags): set[WardFlag] =
@@ -106,7 +107,9 @@ template isFlagOn(ward: Ward, flag: WardFlag): bool =
   else:
     false
 
-proc push*[T, F](ward: Ward[T, F], el: T): bool =
+import os
+
+proc push*[T, F](ward: Ward[T, F], el: var T): bool =
   ## Push the element through the ward onto the queue. If the ward is paused or
   ## there is some restriction on access, a false is returned (which means the
   ## el is still a valid reference/pointer).
@@ -133,20 +136,25 @@ proc unsafePush*[T, F](ward: Ward[T, F], el: T): bool =
     if not ward.isFlagOn PushPausable:
       ward.queue.unsafePush el
       result = true
-import cps
+
+
 proc pop*[T, F](ward: Ward[T, F]): T =
   ## Pop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
   when PoolWaiter in F:
-    if not ward.isFlagOn PopPausable:
-      while not result.running:
-        result = ward.queue.popImpl(true)
-        if not result.running:
-          wait(ward.values.addr(), ward.values)
+    template truthy: untyped =
+      not ward.isFlagOn(PopPausable) and
+      (res = ward.queue.popImpl(true); res).isNil()
+
+    var res: T
+    while truthy:
+      wait(ward.values.addr(), ward.values)
+    return res
 
   else:
     if not ward.isFlagOn PopPausable:
       result = ward.queue.pop()
+
 proc unsafePop*[T, F](ward: Ward[T, F]): T =
   ## unsafePop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
@@ -161,24 +169,29 @@ proc unsafePop*[T, F](ward: Ward[T, F]): T =
       result = ward.queue.unsafePop()
 
 
-template pauseImpl[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
-  when flags.intersection ward.flags == flags:
-    if `and`(ward.values.fetchOr(flags, moRelease), flags) > 0'u16:
+template pauseImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+  when flagset * ward.flags == flagset:
+    if `and`(ward.values.fetchOr(flagset, moRelease), flagset) > 0'u16:
       true
     else:
       false
   else:
     raise ValueError.newException:
-      "You require this flag on the ward: " & $flags
-template resumeImpl[T, F](ward: Ward[T, F], flag: set[WardFlag]): bool =
-  when flags.intersection ward.flags == flags:
-    if `and`(ward.values.fetchAnd(complement flags, moRelease), flags) > 0'u16:
+      "You require this flag on the ward: " & $flagset
+template resumeImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+  when flagset * ward.flags == flagset:
+    if `and`(ward.values.fetchAnd(complement flagset, moRelease), flagset) > 0'u16:
       true
     else:
       false
   else:
     raise ValueError.newException:
-      "You require this flag on the ward: " & $flags
+      "You require this flag on the ward: " & $flagset
+
+proc killWaiters*[T, F](ward: Ward[T, F]) =
+  when PoolWaiter in F:
+    discard ward.pauseImpl {PopPausable}
+    wakeAll(ward.values.addr())
 # These pause functions will only stop ward access that have not yet begun.
 # This must be kept in mind when considering activity on the queue else.
 proc pause*[T, F](ward: Ward[T, F]): bool =

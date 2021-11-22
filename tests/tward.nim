@@ -12,9 +12,9 @@ import loony
 import loony/ward
 
 const
-  continuationCount = 10_000
+  continuationCount = 1000
 let
-  threadCount = 12
+  threadCount = 11
 
 type
   C = ref object of Continuation
