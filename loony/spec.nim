@@ -51,17 +51,6 @@ type
     ## All 3 bits set = node can be reclaimed
     reclaim*  : Atomic[uint8]     #                   1 byte
 
-proc `=destroy`*[T](x: var Loonatic[T]) {.nodestroy.} =
-  if x.bin.isNil():
-    discard
-
-proc loobin*[T](obj: T): Loonatic[T] =
-  Loonatic[T](bin: obj)
-
-proc extract*[T](x: var Loonatic[T]): T =
-  result = x.bin
-  disarm(x.bin)
-
 proc getHigh*(mask: ControlMask): uint16 =
   (mask shr SHIFT).uint16
 

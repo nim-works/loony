@@ -315,9 +315,9 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           #   result = extract res
           # else:
           result = cast[T](prev and SLOTMASK)
-          when result is ref or result is pointer:
+          when T is ref or T is pointer:
             assert not result.isNil
-          when result is ref:
+          when T is ref:
             # echo atomicRc(result)
             GC_unref result
           break

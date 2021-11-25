@@ -156,7 +156,6 @@ proc incrEnqCount*(node: var Node; final: uint16 = 0) =
       `=destroy` node
       incEnqCounter()
   else:
-    # echo finalCount - ((mask.uint16 and MASK) + 1), "\n"
     incEnqPathCounter()
 
 proc incrDeqCount*(node: var Node; final: uint16 = 0) =

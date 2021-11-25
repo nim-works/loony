@@ -53,6 +53,7 @@ proc runThings() {.thread.} =
     var job = pop q
     var i: bool
     if job.isNil():
+      echo "breaking"
       break
     else:
       if job.e < 3:
