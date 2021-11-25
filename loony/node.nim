@@ -80,12 +80,16 @@ template toUInt*(nodeptr: ptr Node): uint =
   # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-proc prepareElement*[T](el: var T): uint =
+proc prepareElement*[T](el: T): uint =
   ## Prepare an item to be taken into the queue; we bump the RC first to
   ## ensure that no other operations free it, then add the WRITER bit.
-  result = cast[uint](el) or WRITER
+  # when T is ref:
+  #   var pel = loobin el
+  #   result = cast[uint](pel) or WRITER
+  # else:
   when T is ref:
-    wasMoved el
+    GC_ref el
+  result = cast[uint](el) or WRITER
 
 template fetchNext*(node: Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
   node.next.load(order = moorder)

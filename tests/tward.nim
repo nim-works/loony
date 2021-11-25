@@ -129,6 +129,7 @@ suite "loony":
         echo "passed 2"
         sleep(5_000)
         echo counter.load()
+        killWaiters(q)
         for thread in threads.mitems:
           joinThread thread
         checkpoint "joined $# threads" % [ $threadCount ]

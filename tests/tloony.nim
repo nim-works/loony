@@ -1,3 +1,5 @@
+import loony/utils/arc
+
 import std/osproc
 import std/strutils
 import std/logging
@@ -17,9 +19,13 @@ let
   threadCount = 11
 
 type
+  C = object
+    r: bool
+    e: int
   Cop = ref object
     r: bool
     e: int
+  # Cop = ptr C
 
 addHandler newConsoleLogger()
 setLogFilter:
@@ -35,11 +41,11 @@ w = newLoonyQueue[Cop]()
 var q = w.newWard({PoolWaiter})
 var counter {.global.}: Atomic[int]
 
-proc enqueue(c: var Cop) =
+proc enqueue(c: Cop) =
   check not q.isNil
   c.r = true
   c.e = c.e + 1
-  let v = q.push(c)
+  discard q.push(c)
 
 
 proc runThings() {.thread.} =
@@ -52,6 +58,8 @@ proc runThings() {.thread.} =
       if job.e < 3:
         enqueue job
       else:
+        # freeShared(job)
+        atomicThreadFence(ATOMIC_RELEASE)
         discard counter.fetchAdd(1)
 
 template expectCounter(n: int): untyped =
@@ -82,11 +90,15 @@ block:
         sleep(500)
         echo "Lets begin"
         for i in 0 ..< continuationCount:
+          discard counter.load()
+          atomicThreadFence(ATOMIC_ACQUIRE)
           var c = new Cop
-          c = Cop()
+          
+          # var c = cast[Cop](createShared(C))
+          # c[] = C()
           enqueue c
         checkpoint "queued $# continuations" % [ $continuationCount ]
-        sleep(5_000)
+        sleep(1_000)
         q.killWaiters
         for thread in threads.mitems:
           joinThread thread

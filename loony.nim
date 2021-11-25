@@ -207,7 +207,7 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
 # announce both operations completion (in case of a read) and also makes
 # determining the order in which two operations occured possible.
 
-proc pushImpl[T](queue: LoonyQueue[T], el: var T,
+proc pushImpl[T](queue: LoonyQueue[T], el: T,
                     forcedCoherance: static bool = false) =
   doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit
@@ -284,7 +284,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
     var (tail, curr) = tailAndMane queue
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
-      return nil
+      return
 
     var head = queue.fetchIncHead()
     if likely(head.idx < N):
@@ -310,9 +310,15 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # cache lines with atomic writes and loads rather than requiring a
           # CPU to completely commit its STOREBUFFER
 
+          # when T is ref:
+          #   var res = cast[Loonatic[T]](prev and SLOTMASK)
+          #   result = extract res
+          # else:
           result = cast[T](prev and SLOTMASK)
-          assert not result.isNil
+          when result is ref or result is pointer:
+            assert not result.isNil
           when result is ref:
+            # echo atomicRc(result)
             GC_unref result
           break
     else:

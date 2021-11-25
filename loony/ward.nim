@@ -109,7 +109,7 @@ template isFlagOn(ward: Ward, flag: WardFlag): bool =
 
 import os
 
-proc push*[T, F](ward: Ward[T, F], el: var T): bool =
+proc push*[T, F](ward: Ward[T, F], el: T): bool =
   ## Push the element through the ward onto the queue. If the ward is paused or
   ## there is some restriction on access, a false is returned (which means the
   ## el is still a valid reference/pointer).
@@ -141,10 +141,14 @@ proc unsafePush*[T, F](ward: Ward[T, F], el: T): bool =
 proc pop*[T, F](ward: Ward[T, F]): T =
   ## Pop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
-  when PoolWaiter in F:
+  when PoolWaiter in F and (T is ref or T is pointer):
     template truthy: untyped =
       not ward.isFlagOn(PopPausable) and
       (res = ward.queue.popImpl(true); res).isNil()
+  elif PoolWaiter in F:
+    template truthy: untyped =
+      not ward.isFlagOn(PopPausable) and
+      (res = ward.queue.popImpl(true); res) == default(T)
 
     var res: T
     while truthy:
@@ -169,16 +173,16 @@ proc unsafePop*[T, F](ward: Ward[T, F]): T =
       result = ward.queue.unsafePop()
 
 
-template pauseImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+template pauseImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
   when flagset * ward.flags == flagset:
-    if `and`(ward.values.fetchOr(flagset, moRelease), flagset) > 0'u16:
+    if `and`(cast[ptr uint16](ward.values.addr()).atomicFetchOr(flagset, ATOMIC_RELEASE), flagset) > 0'u16:
       true
     else:
       false
   else:
     raise ValueError.newException:
       "You require this flag on the ward: " & $flagset
-template resumeImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+template resumeImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
   when flagset * ward.flags == flagset:
     if `and`(ward.values.fetchAnd(complement flagset, moRelease), flagset) > 0'u16:
       true
@@ -190,7 +194,7 @@ template resumeImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
 
 proc killWaiters*[T, F](ward: Ward[T, F]) =
   when PoolWaiter in F:
-    discard ward.pauseImpl {PopPausable}
+    discard ward.pauseImpl({PopPausable})
     wakeAll(ward.values.addr())
 # These pause functions will only stop ward access that have not yet begun.
 # This must be kept in mind when considering activity on the queue else.
