@@ -368,7 +368,10 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
     var (tail, curr) = tailAndMane queue
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
-      return nil
+      when T is object:
+        return default(T)
+      else:
+        return nil
 
     var head = queue.fetchIncHead()
     if likely(head.idx < N):
