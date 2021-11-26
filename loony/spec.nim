@@ -31,8 +31,6 @@ const
   SLOTMASK*  : uint = high(uint) xor (RESUME or WRITER or READER)
 
 type
-  Loonatic*[T] = object
-    bin: T
   NodePtr* = uint
   TagPtr* = uint  ##
     ## Aligned pointer with 12 bit prefix containing the tag.

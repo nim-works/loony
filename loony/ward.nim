@@ -49,7 +49,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
   when nimvm:
     for flag in items(flags):
       block:
-        if flag == Pausable or flag == PoolWaiter:
+        if flag in {Pausable, PoolWaiter}:
           result = result or (1'u16 shl PopPausable.ord)
           result = result or (1'u16 shl PushPausable.ord)
         result = result or (1'u16 shl flag.ord)
@@ -64,7 +64,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
         PushPausable in flags and
         not (Pausable in flags):
       result = result or (1'u16 shl Pausable.ord)
-    if flags.contains(Pausable) or flags.contains(PoolWaiter):
+    if flags * {Pausable, PoolWaiter} != {}:
       result = result or (cast[uint16]({PopPausable, PushPausable}))
 
 converter toFlags*(value: WardFlags): set[WardFlag] =
@@ -107,8 +107,6 @@ template isFlagOn(ward: Ward, flag: WardFlag): bool =
     `and`(ward.values.load(moAcquire), {flag}) > 0'u16
   else:
     false
-
-import os
 
 proc push*[T, F](ward: Ward[T, F], el: T): bool =
   ## Push the element through the ward onto the queue. If the ward is paused or

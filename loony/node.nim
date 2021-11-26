@@ -83,10 +83,6 @@ template toUInt*(nodeptr: ptr Node): uint =
 proc prepareElement*[T](el: T): uint =
   ## Prepare an item to be taken into the queue; we bump the RC first to
   ## ensure that no other operations free it, then add the WRITER bit.
-  # when T is ref:
-  #   var pel = loobin el
-  #   result = cast[uint](pel) or WRITER
-  # else:
   when T is ref:
     GC_ref el
   result = cast[uint](el) or WRITER
