@@ -20,7 +20,9 @@ export
 # raise Defect(nil)
 
 type
-  LoonyQueue*[T] = ref object
+
+  LoonyQueue*[T] = ref LoonyQueueImpl[T]
+  LoonyQueueImpl*[T] = object
     head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
     tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
     currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
@@ -34,15 +36,17 @@ type
     QueueEmpty      # 0000_0000
     Advanced        # 0000_0001
 
-# TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of
-# the tail to contain the index of the slot to its corresponding node
-# by aligning the node pointers on allocation. Since the index value is
-# stored in the same memory word as its associated node pointer, the FAA
-# operations could potentially affect both values if too many increments
-# were to occur. This is accounted for in the algorithm and with space
-# for overflow in the alignment. See Section 5.2 for the paper to see
-# why an overflow would prove impossible except under extraordinarily
-# large number of thread contention.
+#[
+  TagPtr is an alias for 8 byte uint (pointer). We reserve a portion of
+  the tail to contain the index of the slot to its corresponding node
+  by aligning the node pointers on allocation. Since the index value is
+  stored in the same memory word as its associated node pointer, the FAA
+  operations could potentially affect both values if too many increments
+  were to occur. This is accounted for in the algorithm and with space
+  for overflow in the alignment. See Section 5.2 for the paper to see
+  why an overflow would prove impossible except under extraordinarily
+  large number of thread contention.
+]#
 
 template nptr(tag: TagPtr): NodePtr = toNodePtr(tag and PTRMASK)
 template node(tag: TagPtr): var Node = cast[ptr Node](nptr(tag))[]
@@ -92,12 +96,90 @@ template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
                                 swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
 
-# Both enqueue and dequeue enter FAST PATH operations 99% of the time,
-# however in cases we enter the SLOW PATH operations represented in both
-# enq and deq by advTail and advHead respectively.
-#
-# This path requires the threads to first help updating the linked list
-# struct before retrying and entering the fast path in the next attempt.
+proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
+  ## Destroy is completely operated on the basis that no other threads are
+  ## operating on the queue at the same time. To not follow this will result in
+  ## SIGSEGVs and undefined behaviour.
+  var loadedLine: int # we want to track what cache line we have loaded and
+                      # ensure we perform an atomic load at least once on each cache line
+  var headNodeIdx: (NodePtr, uint16)
+  var tailNode: ptr Node
+  var tailIdx: uint16
+  var slotptr: ptr uint
+  var slotval: uint
+  block:
+
+    template getHead: untyped =
+      let tptr = x.head.load()
+      headNodeIdx = (tptr.nptr, tptr.idx)
+
+    template getTail: untyped =
+      if tailNode.isNil():
+        let tptr = x.tail.load()
+        tailNode = cast[ptr Node](tptr.nptr)
+        tailIdx = tptr.idx
+        loadedLine = cast[int](tailNode)
+      else:
+        let oldNode = tailNode
+        tailNode = cast[ptr Node](tailNode.next.load().nptr())
+        tailIdx = 0'u16
+        deallocNode oldNode
+
+    template loadSlot: untyped =
+      slotptr = cast[ptr uint](tailNode.slots[tailIdx].addr())
+      if (loadedLine + 64) < cast[int](slotptr):
+        slotval = slotptr.atomicLoadN(ATOMIC_RELAXED)
+        loadedLine = cast[int](slotptr)
+      elif not slotptr.isNil():
+        slotval = slotptr[]
+      else:
+        slotval = 0'u
+        
+
+    template truthy: bool =
+      (cast[NodePtr](tailNode), tailIdx) == headNodeIdx
+    template idxTruthy: bool =
+      if cast[NodePtr](tailNode) == headNodeIdx[1]:
+        tailIdx < N
+      else:
+        tailIdx <= headNodeIdx[1]
+
+
+    getHead()
+    getTail()
+    if (loadedLine mod 64) != 0:
+      loadedLine = loadedLine - (loadedLine mod 64)
+
+    while not truthy:
+      
+      while idxTruthy:
+        loadSlot()
+        if (slotval and spec.WRITER) == spec.WRITER:
+          if (slotval and CONSUMED) == CONSUMED:
+            inc tailIdx
+          elif (slotval and PTRMASK) != 0'u:
+            var el = cast[T](slotval and PTRMASK)
+            when T is ref:
+              GC_unref el
+            else:
+              `=destroy`(el)
+            inc tailIdx
+        else:
+          break
+      getTail()
+      if tailNode.isNil():
+        break
+    if not tailNode.isNil():
+      deallocNode(tailNode)
+
+#[
+  Both enqueue and dequeue enter FAST PATH operations 99% of the time,
+  however in cases we enter the SLOW PATH operations represented in both
+  enq and deq by advTail and advHead respectively.
+
+  This path requires the threads to first help updating the linked list
+  struct before retrying and entering the fast path in the next attempt.
+]#
 
 proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
   # Modified version of Michael-Scott algorithm
@@ -178,39 +260,42 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
         incrDeqCount(h.node, curr.idx - N)
       Advanced
 
-# Fundamentally, both enqueue and dequeue operations attempt to
-# exclusively reserve access to a slot in the array of their associated
-# queue node by automatically incremementing the appropriate index value
-# and retrieving the previous value of the index as well as the current
-# node pointer.
-#
-# Threads that retrieve an index i < N (length of the slots array) gain
-# *exclusive* rights to perform either write/consume operation on the
-# corresponding slot.
-#
-# This guarantees there can only be exactly one of each for any given
-# slot.
-#
-# Where i < N, we use FAST PATH operations. These operations are
-# designed to be as fast as possible while only dealing with memory
-# contention in rare edge cases.
-#
-# if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead
-# above.
-#
-# Fetch And Add (FAA) primitives are used for both incrementing index
-# values as well as performing read(consume) and write operations on
-# reserved slots which drastically improves scalability compared to
-# Compare And Swap (CAS) primitives.
-#
-# Note that all operations on slots must modify the slots state bits to
-# announce both operations completion (in case of a read) and also makes
-# determining the order in which two operations occured possible.
+#[
+  Fundamentally, both enqueue and dequeue operations attempt to
+  exclusively reserve access to a slot in the array of their associated
+  queue node by automatically incremementing the appropriate index value
+  and retrieving the previous value of the index as well as the current
+  node pointer.
+
+  Threads that retrieve an index i < N (length of the slots array) gain
+  *exclusive* rights to perform either write/consume operation on the
+  corresponding slot.
+
+  This guarantees there can only be exactly one of each for any given
+  slot.
+
+  Where i < N, we use FAST PATH operations. These operations are
+  designed to be as fast as possible while only dealing with memory
+  contention in rare edge cases.
+
+  if not i < N, we enter SLOW PATH operations. See AdvTail and AdvHead
+  above.
+
+  Fetch And Add (FAA) primitives are used for both incrementing index
+  values as well as performing read(consume) and write operations on
+  reserved slots which drastically improves scalability compared to
+  Compare And Swap (CAS) primitives.
+
+  Note that all operations on slots must modify the slots state bits to
+  announce both operations completion (in case of a read) and also makes
+  determining the order in which two operations occured possible.
+]#
 
 proc pushImpl[T](queue: LoonyQueue[T], el: T,
                     forcedCoherance: static bool = false) =
   doAssert not queue.isNil(), "The queue has not been initialised"
-  # Begin by tagging pointer el with WRITER bit
+  # Begin by tagging pointer el with WRITER bit and increasing the ref
+  # count if necessary
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
   # primitive; it will be preferred while proving safety before working towards
@@ -310,9 +395,9 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # CPU to completely commit its STOREBUFFER
 
           result = cast[T](prev and SLOTMASK)
-          assert not result.isNil
-          when result is ref:
-            GC_unref result
+          when T is ref:
+            GC_unref result # We incref on the push, so we have to make sure to
+                            # to decref or we will get memory leaks
           break
     else:
       # SLOW PATH OPS
@@ -335,22 +420,27 @@ proc unsafePop*[T](queue: LoonyQueue[T]): T =
   ## related to the item.
   popImpl(queue, forcedCoherance = false)
 
-# Consumed slots have been written to and then read. If a concurrent
-# deque operation outpaces the corresponding enqueue operation then both
-# operations have to abandon and try again. Once all slots in the node
-# have been consumed or abandoned, the node is considered drained and
-# unlinked from the list. Node can be reclaimed and de-allocated.
-#
-# Queue manages an enqueue index and a dequeue index. Each are modified
-# by fetchAndAdd; gives thread reserves previous index for itself which
-# may be used to address a slot in the respective nodes array.
-#
-# both node pointers are tagged with their assoc index value ->
-# they store both address to respective node as well as the current
-# index value in the same memory word.
-#
-# Requires a sufficient number of available bits that are not used to
-# present the nodes addresses themselves.
+#[
+  Consumed slots have been written to and then read. If a concurrent
+  deque operation outpaces the corresponding enqueue operation then both
+  operations have to abandon and try again. Once all slots in the node
+  have been consumed or abandoned, the node is considered drained and
+  unlinked from the list. Node can be reclaimed and de-allocated.
+
+  Queue manages an enqueue index and a dequeue index. Each are modified
+  by fetchAndAdd; gives thread reserves previous index for itself which
+  may be used to address a slot in the respective nodes array.
+
+  both node pointers are tagged with their assoc index value ->
+  they store both address to respective node as well as the current
+  index value in the same memory word.
+
+  Requires a sufficient number of available bits that are not used to
+  present the nodes addresses themselves.
+]#
+
+      
+      
 
 proc initLoonyQueue*(q: LoonyQueue) =
   ## Initialize an existing LoonyQueue.
@@ -364,8 +454,7 @@ proc initLoonyQueue*(q: LoonyQueue) =
     var t = load tailTag.toNode().slots[i]
     assert h == 0, "Slot found to not be nil on initialisation"
     assert t == 0, "Slot found to not be nil on initialisation"
-  # I mean the enqueue and dequeue pretty well handle any issues with
-  # initialising, but I might as well help allocate the first ones right?
+  # Allocate the first nodes on initialisation to optimise use.
 
 proc initLoonyQueue*[T](): LoonyQueue[T] {.deprecated: "Use newLoonyQueue instead".} =
   ## Return an initialized LoonyQueue.

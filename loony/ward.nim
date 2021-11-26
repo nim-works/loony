@@ -20,8 +20,11 @@ import loony/spec {.all.}
 import loony/node {.all.}
 import loony {.all.}
 
+import loony/utils/futex
+
 import std/atomics
 import std/setutils
+import std/sets
 
 type
   WardFlag* {.size: sizeof(uint16).} = enum
@@ -30,6 +33,8 @@ type
     Clearable   = "this ward is capable of clearing the queue"
     Pausable    = "accessing the queue with this ward can be paused"
     # This flag will automatically infer PopPausable and PushPausable.
+    PoolWaiter  = "This for use by threadpools waiting on loony for work; " &
+                  "they will use futex wait and wake."
 
   WardFlags = uint16
 
@@ -44,7 +49,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
   when nimvm:
     for flag in items(flags):
       block:
-        if flag == Pausable:
+        if flag in {Pausable, PoolWaiter}:
           result = result or (1'u16 shl PopPausable.ord)
           result = result or (1'u16 shl PushPausable.ord)
         result = result or (1'u16 shl flag.ord)
@@ -59,7 +64,7 @@ converter toWardFlags*(flags: set[WardFlag]): WardFlags =
         PushPausable in flags and
         not (Pausable in flags):
       result = result or (1'u16 shl Pausable.ord)
-    if flags.contains Pausable:
+    if flags * {Pausable, PoolWaiter} != {}:
       result = result or (cast[uint16]({PopPausable, PushPausable}))
 
 converter toFlags*(value: WardFlags): set[WardFlag] =
@@ -107,47 +112,98 @@ proc push*[T, F](ward: Ward[T, F], el: T): bool =
   ## Push the element through the ward onto the queue. If the ward is paused or
   ## there is some restriction on access, a false is returned (which means the
   ## el is still a valid reference/pointer).
-  if not ward.isFlagOn PushPausable:
-    ward.queue.push el
-    result = true
+  
+  when PoolWaiter in F:
+    if not ward.isFlagOn PushPausable:
+      ward.queue.pushImpl(el, true)
+      result = true
+      wake(ward.values.addr())
+  else:
+    if not ward.isFlagOn PushPausable:
+      ward.queue.push el
+      result = true
 proc unsafePush*[T, F](ward: Ward[T, F], el: T): bool =
   ## unsafePush the element through the ward onto the queue. If the ward is paused or
   ## there is some restriction on access, a false is returned (which means the
   ## el is still a valid reference/pointer)
-  if not ward.isFlagOn PushPausable:
-    ward.queue.unsafePush el
-    result = true
+  when PoolWaiter in F:
+    if not ward.isFlagOn PushPausable:
+      ward.queue.pushImpl(el, false)
+      result = true
+      wake(ward.values.addr())
+  else:
+    if not ward.isFlagOn PushPausable:
+      ward.queue.unsafePush el
+      result = true
+
 
 proc pop*[T, F](ward: Ward[T, F]): T =
   ## Pop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
-  if not ward.isFlagOn PopPausable:
-    ward.queue.pop()
+  when PoolWaiter in F:
+    when T is pointer or T is ref:
+      template truthy: untyped =
+        not ward.isFlagOn(PopPausable) and
+        (res = ward.queue.popImpl(true); res).isNil()
+    else:
+      template truthy: untyped =
+        not ward.isFlagOn(PopPausable) and
+        (res = ward.queue.popImpl(true); res) == default(T)
+
+    var res: T
+    while truthy:
+      wait(ward.values.addr(), ward.values)
+    return res
+
+  else:
+    if not ward.isFlagOn PopPausable:
+      result = ward.queue.pop()
+
 proc unsafePop*[T, F](ward: Ward[T, F]): T =
   ## unsafePop an element off the queue in the ward. If the ward is paused or
   ## there is some restriction on access, a nil pointer is returned
-  if not ward.isFlagOn PopPausable:
-    ward.queue.unsafePop()
+  when PoolWaiter in F:
+    if not ward.isFlagOn PopPausable:
+      while result.isNil:
+        result = ward.queue.popImpl(false)
+        if result.isNil:
+          wait(ward.values.addr(), ward.values)
+  else:
+    if not ward.isFlagOn PopPausable:
+      result = ward.queue.unsafePop()
 
 
-template pauseImpl[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
-  when flags.intersection ward.flags == flags:
-    if `and`(ward.values.fetchOr(flags, moRelease), flags) > 0'u16:
+template pauseImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+  when flagset * ward.flags == flagset:
+    if `and`(cast[ptr uint16](ward.values.addr()).atomicFetchOr(flagset, ATOMIC_RELEASE), flagset) > 0'u16:
       true
     else:
       false
   else:
     raise ValueError.newException:
-      "You require this flag on the ward: " & $flags
-template resumeImpl[T, F](ward: Ward[T, F], flag: set[WardFlag]): bool =
-  when flags.intersection ward.flags == flags:
-    if `and`(ward.values.fetchAnd(complement flags, moRelease), flags) > 0'u16:
+      "You require this flag on the ward: " & $flagset
+template resumeImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+  when flagset * ward.flags == flagset:
+    if `and`(ward.values.fetchAnd(complement flagset, moRelease), flagset) > 0'u16:
       true
     else:
       false
   else:
     raise ValueError.newException:
-      "You require this flag on the ward: " & $flags
+      "You require this flag on the ward: " & $flagset
+
+proc killWaiters*[T, F](ward: Ward[T, F]) =
+  ## This will pause the slot and then awaken all waiters which will cause them
+  ## to return a null value.
+  ## NOTE: This means that the ward will remain paused after kill waiters
+  ## is used (since it is usually used on cleaning resources this shouldn't be
+  ## an issue but can be reverted using resume as with other pauses)
+  when PoolWaiter in F:
+    discard ward.pauseImpl({PopPausable})
+    wakeAll(ward.values.addr())
+  else:
+    raise ValueError.newException:
+      "You require this flag on the ward: PoolWaiter"
 # These pause functions will only stop ward access that have not yet begun.
 # This must be kept in mind when considering activity on the queue else.
 proc pause*[T, F](ward: Ward[T, F]): bool =
