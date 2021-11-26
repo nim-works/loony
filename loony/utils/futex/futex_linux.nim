@@ -41,3 +41,6 @@ proc wake*(monitor: pointer) {.inline.} =
   # or a Posix error code (if negative)
   # We discard as this is not needed and simplifies compat with Windows futex
   discard sysFutex(monitor, FutexWakePrivate, 1)
+
+proc wakeAll*(monitor: pointer) {.inline.} =
+  discard sysFutex(monitor, FutexWakePrivate, high(cint))
