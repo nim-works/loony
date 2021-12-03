@@ -25,10 +25,10 @@ const
   ULF_WAKE_MASK = ULF_NO_ERRNO or ULF_WAKE_ALL or ULF_WAKE_THREAD or
                   ULF_WAKE_ALLOW_NON_OWNER
 
-proc ulock_wait*(operation: uint32; address: pointer; value: uint64;
+proc ulock_wait(operation: uint32; address: pointer; value: uint64;
                 timeout: uint32): cint {.importc:"__ulock_wait", cdecl.}
 
-proc ulock_wake*(operation: uint32; address: pointer; wake_value: uint64): cint {.importc:"__ulock_wake", cdecl.}
+proc ulock_wake(operation: uint32; address: pointer; wake_value: uint64): cint {.importc:"__ulock_wake", cdecl.}
 
 proc wait*[T](monitor: ptr T; compare: T) {.inline.} =
   discard ulock_wait(UL_UNFAIR_LOCK64_SHARED, monitor, cast[uint64](compare), 0u32)
