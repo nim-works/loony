@@ -101,6 +101,7 @@ template fetchAddSlot*(t: Node, idx: uint16, w: uint, moorder: MemoryOrder = moA
   ## Remembering that the pointer has 3 tail bits clear; these are
   ## reserved and increased atomically to indicate RESUME, READER, WRITER
   ## statuship.
+  mixin fetchAdd
   t.slots[idx].fetchAdd(w, order = moorder)
 
 template compareAndSwapNext*(t: Node, expect: var uint, swap: uint): bool =
