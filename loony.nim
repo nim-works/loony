@@ -442,7 +442,24 @@ proc unsafePop*[T](queue: LoonyQueue[T]): T =
   present the nodes addresses themselves.
 ]#
 
-      
+proc countImpl[T](queue: LoonyQueue[T]): int =
+  var head = queue.fetchHead()
+  var nodes: int
+  var andysBalls: TagPtr = head
+  while true:
+    andysBalls = andysBalls.node.next.load(moRelaxed)
+    if andysBalls == 0'u:
+      break
+    inc nodes
+  var (currHead, currTail) = queue.maneAndTail()
+  if currHead.nptr != head.nptr:
+    dec nodes
+  result = nodes * N + (N - currHead.idx.int) + currTail.idx.int
+
+proc len*[T](queue: LoonyQueue[T]): int =
+  ## Does as labelled on the bottle. The nature of loony queue means that the returned
+  ## value is not 100% accurate when there is high contention/activity on the queue.
+  countImpl queue
       
 
 proc initLoonyQueue*(q: LoonyQueue) =

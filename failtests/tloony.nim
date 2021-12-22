@@ -1,5 +1,3 @@
-import loony/utils/arc
-
 import std/osproc
 import std/strutils
 import std/logging

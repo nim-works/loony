@@ -20,7 +20,7 @@ import loony/spec {.all.}
 import loony/node {.all.}
 import loony {.all.}
 
-import loony/utils/futex
+import pkg/futexes
 
 import std/atomics
 import std/setutils
@@ -334,21 +334,12 @@ proc clear*[T, F](ward: Ward[T, F]) =
     raise ValueError.newException:
       "This ward does not have the Clearable flag set"
 
-proc countImpl[T](queue: LoonyQueue[T]): int =
-  var head = queue.fetchHead()
-  var nodes: int
-  var andysBalls: TagPtr = head
-  while true:
-    andysBalls = andysBalls.node.next.load(moRelaxed)
-    if andysBalls == 0'u:
-      break
-    inc nodes
-  var (currHead, currTail) = queue.maneAndTail()
-  if not currHead.nptr == head.nptr:
-    dec nodes
-  result = nodes * N + (N - currHead.idx) + currTail.idx
+proc count*[T, F](ward: Ward[T, F]): int {.deprecated: "Please use `len` instead".} =
+  ## Does as labelled on the bottle. The nature of loony queue means that the returned
+  ## value is not 100% accurate when there is high contention/activity on the queue.
+  countImpl ward.queue
 
-proc count*[T, F](ward: Ward[T, F]) =
+proc len*[T, F](ward: Ward[T, F]): int =
   ## Does as labelled on the bottle. The nature of loony queue means that the returned
   ## value is not 100% accurate when there is high contention/activity on the queue.
   countImpl ward.queue
