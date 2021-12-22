@@ -457,6 +457,8 @@ proc countImpl[T](queue: LoonyQueue[T]): int =
   result = nodes * N + (N - currHead.idx.int) + currTail.idx.int
 
 proc len*[T](queue: LoonyQueue[T]): int =
+  ## Does as labelled on the bottle. The nature of loony queue means that the returned
+  ## value is not 100% accurate when there is high contention/activity on the queue.
   countImpl queue
       
 
