@@ -452,7 +452,7 @@ proc countImpl[T](queue: LoonyQueue[T]): int =
       break
     inc nodes
   var (currHead, currTail) = queue.maneAndTail()
-  if not currHead.nptr == head.nptr:
+  if currHead.nptr != head.nptr:
     dec nodes
   result = nodes * N + (N - currHead.idx.int) + currTail.idx.int
 
