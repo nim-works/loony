@@ -23,9 +23,20 @@ type
 
   LoonyQueue*[T] = ref LoonyQueueImpl[T]
   LoonyQueueImpl*[T] = object
-    head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
-    tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
-    currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
+    when loonyPadding:
+      head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
+      paddingh : array[7, uint] # See below
+      tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
+      paddinght: array[7, uint] # See below
+      currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
+      paddingt : array[7, uint] # See below
+    else:
+      head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
+      tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
+      currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
+    # These can all heavily contested when there are numerous consumers and
+    # producers acting on the same queue. There may be some optimisation found
+    # by separating the tags onto separate cache lines
 
   ## Result types for the private
   ## advHead and advTail functions
@@ -55,8 +66,9 @@ proc toStrTuple*(tag: TagPtr): string =
   var res = (nptr:tag.nptr, idx:tag.idx)
   return $res
 
-proc fetchAddSlot(tag: TagPtr; w: uint): uint =
+template fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
+  mixin fetchAddSlot
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
 template fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
@@ -78,11 +90,12 @@ template fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
 
 # Bug #11 - Using these as templates would cause errors unless the end user
 # imported std/atomics or we export atomics.
-# For the sake of not polluting the users namespace I have changed these into procs.
-# Atomic inc of idx in (nptr: NodePtr, idx: uint16)
-proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+# Requires mixins to prevent this error
+template fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+  mixin fetchAdd
   cast[TagPtr](queue.tail.fetchAdd(1, order = moorder))
-proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+template fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+  mixin fetchAdd
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
 
