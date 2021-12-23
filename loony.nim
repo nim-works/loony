@@ -20,8 +20,8 @@ export
 # raise Defect(nil)
 
 type
-
   LoonyQueue*[T] = ref LoonyQueueImpl[T]
+  LoonyQueueSC*[T] = ref LoonyQueueImplSC[T]
   LoonyQueueImpl*[T] = object
     when loonyPadding:
       head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
@@ -32,6 +32,22 @@ type
       paddingt : array[7, uint] # See below
     else:
       head     : Atomic[TagPtr]     ## Whereby node contains the slots and idx
+      tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
+      currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
+    # These can all heavily contested when there are numerous consumers and
+    # producers acting on the same queue. There may be some optimisation found
+    # by separating the tags onto separate cache lines
+
+  LoonyQueueImplSC*[T] = object
+    when true: # SC must be padded to prevent false sharing invalidations
+      head     : TagPtr     ## Whereby node contains the slots and idx
+      paddingh : array[7, uint] # See below
+      tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
+      paddinght: array[7, uint] # See below
+      currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
+      paddingt : array[7, uint] # See below
+    else:
+      head     : TagPtr     ## Whereby node contains the slots and idx
       tail     : Atomic[TagPtr]     ## is the uint16 index of the slot array
       currTail : Atomic[NodePtr]    ## 8 bytes Current NodePtr
     # These can all heavily contested when there are numerous consumers and
@@ -71,7 +87,7 @@ template fetchAddSlot(tag: TagPtr; w: uint): uint =
   mixin fetchAddSlot
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
-template fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
+template fetchTail(queue: LoonyQueue | LoonyQueueSC, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
   TagPtr(load(queue.tail, order = moorder))
 
@@ -91,7 +107,7 @@ template fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
 # Bug #11 - Using these as templates would cause errors unless the end user
 # imported std/atomics or we export atomics.
 # Requires mixins to prevent this error
-template fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
+template fetchIncTail(queue: LoonyQueue | LoonyQueueSC, moorder: MemoryOrder = moAcquire): TagPtr =
   mixin fetchAdd
   cast[TagPtr](queue.tail.fetchAdd(1, order = moorder))
 template fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
@@ -99,7 +115,7 @@ template fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagP
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
 
-template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+template compareAndSwapTail(queue: LoonyQueue | LoonyQueueSC, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
 
 template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
@@ -194,7 +210,7 @@ proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
   struct before retrying and entering the fast path in the next attempt.
 ]#
 
-proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
+proc advTail[T](queue: LoonyQueue[T] | LoonyQueueSC[T]; pel: uint; tag: TagPtr): AdvTail =
   # Modified version of Michael-Scott algorithm
   # Attempt allocate & append new node on previous tail
   var origTail = tag.nptr
@@ -304,8 +320,12 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   determining the order in which two operations occured possible.
 ]#
 
-proc pushImpl[T](queue: LoonyQueue[T], el: T,
+template pushImpl[T](queue: LoonyQueue[T] | LoonyQueueSC[T], el: T,
                     forcedCoherance: static bool = false) =
+  mixin idx
+  mixin node
+  mixin advTail
+
   doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit and increasing the ref
   # count if necessary
@@ -350,13 +370,13 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
 
 
-proc push*[T](queue: LoonyQueue[T], el: T) =
+proc push*[T](queue: LoonyQueue[T] | LoonyQueueSC[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherance = true)
-proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+proc unsafePush*[T](queue: LoonyQueue[T] | LoonyQueueSC[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## Unlike push, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the receiving thread has old cached memory
@@ -373,63 +393,111 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
+template popImpl[T](queue: LoonyQueue[T] | LoonyQueueSC[T]; forcedCoherance: static bool = false): T =
+  mixin fetchIncHead
+  mixin fetchTail
+  mixin idx
+  mixin node
+  mixin advHead
+  mixin nptr
+  mixin fetchAddReclaim
   doAssert not queue.isNil(), "The queue has not been initialised"
-  while true:
-    # Before incr the deq index, init check performed to determine if queue is empty.
-    # Ensure head is loaded last to keep mem hot
-    var (tail, curr) = tailAndMane queue
-    if isEmptyImpl(curr, tail):
-      # Queue was empty; nil can be caught in cps w/ "while cont.running"
-      when T is object:
-        return default(T)
+  when queue is LoonyQueue:
+    var res: T
+    while true:
+      # Before incr the deq index, init check performed to determine if queue is empty.
+      # Ensure head is loaded last to keep mem hot
+      var (tail, curr) = tailAndMane queue
+      if isEmptyImpl(curr, tail):
+        # Queue was empty; nil can be caught in cps w/ "while cont.running"
+        when T is object:
+          res = default(T)
+          break
+        else:
+          break
+
+      var head = queue.fetchIncHead()
+      if likely(head.idx < N):
+        # FAST PATH OPS
+        var prev = head.fetchAddSlot READER
+        # Last slot in a node - init reclaim proc; if WRITER bit set then upper bits
+        # contain a valid pointer to an enqd el that can be returned (see enqueue)
+        if not unlikely((prev and SLOTMASK) == 0):
+          if (prev and spec.WRITER) != 0:
+            if unlikely((prev and RESUME) != 0):
+              tryReclaim(head.node, head.idx + 1)
+
+            # Ideally before retrieving the ref object itself, we want to allow
+            # CPUs to communicate cache line changes and resolve invalidations
+            # to dirty memory.
+            when forcedCoherance:
+              atomicThreadFence(ATOMIC_ACQUIRE)
+            # CPU halt and clear STOREBUFFER; overwritten cache lines will be
+            # syncd and invalidated ensuring fresh memory from this point in line
+            # with the PUSH operations atomicThreadFence(ATOMIC_RELEASE)
+            # This is the most costly primitive fill the requirement and will be
+            # preferred to prove safety before optimising by targetting specific
+            # cache lines with atomic writes and loads rather than requiring a
+            # CPU to completely commit its STOREBUFFER
+
+            res = cast[T](prev and SLOTMASK)
+            when T is ref:
+              GC_unref res # We incref on the push, so we have to make sure to
+                              # to decref or we will get memory leaks
+            break
       else:
-        return nil
-
-    var head = queue.fetchIncHead()
-    if likely(head.idx < N):
-      # FAST PATH OPS
-      var prev = head.fetchAddSlot READER
-      # Last slot in a node - init reclaim proc; if WRITER bit set then upper bits
-      # contain a valid pointer to an enqd el that can be returned (see enqueue)
-      if not unlikely((prev and SLOTMASK) == 0):
-        if (prev and spec.WRITER) != 0:
-          if unlikely((prev and RESUME) != 0):
-            tryReclaim(head.node, head.idx + 1)
-
-          # Ideally before retrieving the ref object itself, we want to allow
-          # CPUs to communicate cache line changes and resolve invalidations
-          # to dirty memory.
+        # SLOW PATH OPS
+        case queue.advHead(curr, head, tail)
+        of Advanced:
+          discard
+        of QueueEmpty:
+          break
+    res
+  else:
+    var res: T
+    while true:
+      var tail = queue.fetchTail
+      if isEmptyImpl(queue.head, tail):
+        # Queue was empty; nil can be caught in cps w/ "while cont.running"
+        when T is object:
+          res = default(T)
+          break
+        else:
+          break
+      if likely(queue.head.idx < N):
+        var prev = cast[ptr Node](nptr queue.head)[].slots[idx queue.head].load(moAcquire)
+        if not unlikely((prev and SLOTMASK) == 0): # Slot has been written to
+          atomicInc(cast[ptr Node](nptr queue.head)[].slots[idx queue.head], READER)
+          queue.head += 1
           when forcedCoherance:
             atomicThreadFence(ATOMIC_ACQUIRE)
-          # CPU halt and clear STOREBUFFER; overwritten cache lines will be
-          # syncd and invalidated ensuring fresh memory from this point in line
-          # with the PUSH operations atomicThreadFence(ATOMIC_RELEASE)
-          # This is the most costly primitive fill the requirement and will be
-          # preferred to prove safety before optimising by targetting specific
-          # cache lines with atomic writes and loads rather than requiring a
-          # CPU to completely commit its STOREBUFFER
-
-          result = cast[T](prev and SLOTMASK)
+          res = cast[T](prev and SLOTMASK)
           when T is ref:
-            GC_unref result # We incref on the push, so we have to make sure to
+            GC_unref res # We incref on the push, so we have to make sure to
                             # to decref or we will get memory leaks
           break
-    else:
-      # SLOW PATH OPS
-      case queue.advHead(curr, head, tail)
-      of Advanced:
-        discard
-      of QueueEmpty:
-        break
+      else:
+        # SLOW PATH OPS
+        if queue.head.idx == N:
+          inc queue.head
+          tryReclaim(queue.head.node, 0)
+        if queue.head.nptr == queue.fetchTail.nptr:
+          break
+        else:
+          var oldnode = queue.head.node
+          var next = oldnode.next.load(moAcquire)
+          queue.head = cast[TagPtr](next)
+          discard oldnode.ctrl.fetchAddReclaim(DEQ)
+          tryReclaim(oldnode, 0)
+    res
 
-proc pop*[T](queue: LoonyQueue[T]): T =
+proc pop*[T](queue: LoonyQueue[T] | LoonyQueueSC[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePop to avoid this cost.
   popImpl(queue, forcedCoherance = true)
-proc unsafePop*[T](queue: LoonyQueue[T]): T =
+proc unsafePop*[T](queue: LoonyQueue[T] | LoonyQueueSC[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## Unlike pop, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the caller has old cached memory that is
@@ -489,9 +557,16 @@ proc initLoonyQueue*(q: LoonyQueue) =
     assert t == 0, "Slot found to not be nil on initialisation"
   # Allocate the first nodes on initialisation to optimise use.
 
+proc initLoonyQueueSC*(q: LoonyQueueSC) =
+  ## Initialize an existing LoonyQueue.
+  var headTag = cast[uint](allocNode())
+  var tailTag = headTag
+  q.head = headTag
+  q.tail.store tailTag
+  q.currTail.store tailTag
+
 proc initLoonyQueue*[T](): LoonyQueue[T] {.deprecated: "Use newLoonyQueue instead".} =
   ## Return an initialized LoonyQueue.
-  # TODO destroy proc
   new result
   initLoonyQueue result
 
@@ -499,3 +574,8 @@ proc newLoonyQueue*[T](): LoonyQueue[T] =
   ## Return an intialized LoonyQueue.
   new result
   initLoonyQueue result
+
+proc newLoonyQueueSC*[T](): LoonyQueueSC[T] =
+  ## Return an intialized LoonyQueue.
+  new result
+  initLoonyQueueSC result
