@@ -3,7 +3,7 @@ import std/atomics
 const
   loonyNodeAlignment {.intdefine.} = 11
   loonySlotCount {.intdefine.} = 1024
-
+  loonyPadding* {.booldefine.} = false
 doAssert (1 shl loonyNodeAlignment) > loonySlotCount, "Your LoonySlot count exceeds your alignment!"
 
 const
