@@ -32,6 +32,11 @@ type
     next*  : ptr Node            # NodePtr - successor node
     ctrl*  : ControlBlock               # Control block for mem recl  NodePtr* = uint
 
+  #[
+    While bigE and littleE are being handled in the object definitions, they are
+    not fully supported yet in the library code. This will require further work
+    however the base is being set.
+  ]#
   TagPtr* {.byref.} = object
     when littleEndian == cpuEndian:
       tag* {.bitsize: (loonyNodeAlignment).}: uint
@@ -40,7 +45,7 @@ type
       pntr* {.bitsize: (64 - loonyNodeAlignment).}: uint
       tag* {.bitsize: (loonyNodeAlignment).}: uint
       ## Aligned pointer with 12 bit prefix containing the tag.
-      ## Access using procs nptr and idx
+      ## Access using procs getPtr and getTag
   ControlMask* {.byref.} = object
     when littleEndian == cpuEndian:
       lower* {.bitsize: 16.}: uint16
@@ -60,14 +65,14 @@ type
     ## All 3 bits set = node can be reclaimed
     reclaim*  : uint8     #                   1 byte
 
+# Define sizeof funcs for objects else nim will be unable to compile since sizeof
+# imported func cannot be called on incomplete structs in C.
 proc sizeof*(td: TagPtr): int {.compileTime.} = 8
 proc sizeof*(td: ControlMask): int {.compileTime.} = 4
 
 template getTag*(tptr: TagPtr): uint =
-  # TODO handle be
   tptr.tag
 template getPtr*(tptr: TagPtr): ptr Node =
-  # TODO handle be
   cast[ptr Node](cast[uint](tptr) and PTRMASK)
 
 converter toUint*(x: TagPtr): uint = cast[uint](x)

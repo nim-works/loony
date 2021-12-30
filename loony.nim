@@ -21,7 +21,7 @@ type
     head     : TagPtr     ## Whereby node contains the slots and idx
     tail     : TagPtr     ## is the uint16 index of the slot array
     currTail : ptr Node   ## 8 bytes Current NodePtr
-
+  SCLoonyQueue*[T] = ref LoonyQueueImpl[T]
   ## Result types for the private
   ## advHead and advTail functions
   AdvTail = enum
@@ -60,81 +60,81 @@ template fetchIncTail(queue: LoonyQueue, order = Acq): TagPtr =
 template fetchIncHead(queue: LoonyQueue, order = Acq): TagPtr =
   queue.head.fetchAdd(1, order)
 
-# proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
-#   ## Destroy is completely operated on the basis that no other threads are
-#   ## operating on the queue at the same time. To not follow this will result in
-#   ## SIGSEGVs and undefined behaviour.
-#   var loadedLine: int # we want to track what cache line we have loaded and
-#                       # ensure we perform an atomic load at least once on each cache line
-#   var headNodeIdx: (NodePtr, uint16)
-#   var tailNode: ptr Node
-#   var tailIdx: uint16
-#   var slotptr: ptr uint
-#   var slotval: uint
-#   block:
+proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
+  ## Destroy is completely operated on the basis that no other threads are
+  ## operating on the queue at the same time. To not follow this will result in
+  ## SIGSEGVs and undefined behaviour.
+  var loadedLine: int # we want to track what cache line we have loaded and
+                      # ensure we perform an atomic load at least once on each cache line
+  var headNodeIdx: (ptr Node, uint16)
+  var tailNode: ptr Node
+  var tailIdx: uint16
+  var slotptr: ptr uint
+  var slotval: uint
+  block:
 
-#     template getHead: untyped =
-#       let tptr = x.head.load()
-#       headNodeIdx = (tptr.nptr, tptr.idx)
+    template getHead: untyped =
+      let tptr = x.head.load()
+      headNodeIdx = (tptr.getPtr, tptr.getTag.uint16)
 
-#     template getTail: untyped =
-#       if tailNode.isNil():
-#         let tptr = x.tail.load()
-#         tailNode = cast[ptr Node](tptr.nptr)
-#         tailIdx = tptr.idx
-#         loadedLine = cast[int](tailNode)
-#       else:
-#         let oldNode = tailNode
-#         tailNode = cast[ptr Node](tailNode.next.load().nptr())
-#         tailIdx = 0'u16
-#         deallocNode oldNode
+    template getTail: untyped =
+      if tailNode.isNil():
+        let tptr = x.tail.load()
+        tailNode = tptr.getPtr
+        tailIdx = tptr.getTag.uint16
+        loadedLine = cast[int](tailNode)
+      else:
+        let oldNode = tailNode
+        tailNode = tailNode.next.load()
+        tailIdx = 0'u16
+        deallocNode oldNode
 
-#     template loadSlot: untyped =
-#       slotptr = cast[ptr uint](tailNode.slots[tailIdx].addr())
-#       if (loadedLine + 64) < cast[int](slotptr):
-#         slotval = slotptr.atomicLoadN(ATOMIC_RELAXED)
-#         loadedLine = cast[int](slotptr)
-#       elif not slotptr.isNil():
-#         slotval = slotptr[]
-#       else:
-#         slotval = 0'u
+    template loadSlot: untyped =
+      slotptr = cast[ptr uint](tailNode.slots[tailIdx].addr())
+      if (loadedLine + 64) < cast[int](slotptr):
+        slotval = slotptr.atomicLoadN(ATOMIC_RELAXED)
+        loadedLine = cast[int](slotptr)
+      elif not slotptr.isNil():
+        slotval = slotptr[]
+      else:
+        slotval = 0'u
         
 
-#     template truthy: bool =
-#       (cast[NodePtr](tailNode), tailIdx) == headNodeIdx
-#     template idxTruthy: bool =
-#       if cast[NodePtr](tailNode) == headNodeIdx[1]:
-#         tailIdx < loonySlotCount
-#       else:
-#         tailIdx <= headNodeIdx[1]
+    template truthy: bool =
+      (tailNode, tailIdx) == headNodeIdx
+    template idxTruthy: bool =
+      if tailNode == headNodeIdx[1]:
+        tailIdx < loonySlotCount
+      else:
+        tailIdx <= headNodeIdx[1]
 
 
-#     getHead()
-#     getTail()
-#     if (loadedLine mod 64) != 0:
-#       loadedLine = loadedLine - (loadedLine mod 64)
+    getHead()
+    getTail()
+    if (loadedLine mod 64) != 0:
+      loadedLine = loadedLine - (loadedLine mod 64)
 
-#     while not truthy:
+    while not truthy:
       
-#       while idxTruthy:
-#         loadSlot()
-#         if (slotval and spec.WRITER) == spec.WRITER:
-#           if (slotval and CONSUMED) == CONSUMED:
-#             inc tailIdx
-#           elif (slotval and PTRMASK) != 0'u:
-#             var el = cast[T](slotval and PTRMASK)
-#             when T is ref:
-#               GC_unref el
-#             else:
-#               `=destroy`(el)
-#             inc tailIdx
-#         else:
-#           break
-#       getTail()
-#       if tailNode.isNil():
-#         break
-#     if not tailNode.isNil():
-#       deallocNode(tailNode)
+      while idxTruthy:
+        loadSlot()
+        if (slotval and spec.WRITER) == spec.WRITER:
+          if (slotval and CONSUMED) == CONSUMED:
+            inc tailIdx
+          elif (slotval and PTRMASK) != 0'u:
+            var el = cast[T](slotval and PTRMASK)
+            when T is ref:
+              GC_unref el
+            else:
+              `=destroy`(el)
+            inc tailIdx
+        else:
+          break
+      getTail()
+      if tailNode.isNil():
+        break
+    if not tailNode.isNil():
+      deallocNode(tailNode)
 
 #[
   Both enqueue and dequeue enter FAST PATH operations 99% of the time,
@@ -152,7 +152,7 @@ template prepareElement[T](el: T): uint =
     GC_ref el
   cast[uint](el) or WRITER
 
-proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
+proc advTail[T](queue: LoonyQueue[T] | SCLoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
   # Modified version of Michael-Scott algorithm
   # Attempt allocate & append new node on previous tail
   var origTail = tag.getPtr
@@ -206,10 +206,6 @@ proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
         result = AdvOnly
         break done
 
-
-
-
-
 proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   if h.getTag == loonySlotCount:
     # This should reliably trigger reclamation of the node memory on the last
@@ -262,8 +258,12 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   determining the order in which two operations occured possible.
 ]#
 
-proc pushImpl[T](queue: LoonyQueue[T], el: T,
+template pushImpl[T](queue: LoonyQueue[T] | SCLoonyQueue[T], el: T,
                     forcedCoherance: static bool = false) =
+  mixin fetchAddSlot
+  mixin getPtr
+  mixin advTail
+
   doAssert not queue.isNil(), "The queue has not been initialised"
   # Begin by tagging pointer el with WRITER bit and increasing the ref
   # count if necessary
@@ -306,15 +306,13 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
       of AdvOnly:
         discard
 
-
-
-proc push*[T](queue: LoonyQueue[T], el: T) =
+proc push*[T](queue: LoonyQueue[T] | SCLoonyQueue[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherance = true)
-proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+proc unsafePush*[T](queue: LoonyQueue[T] | SCLoonyQueue[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## Unlike push, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the receiving thread has old cached memory
@@ -334,7 +332,13 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
+template popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
+  mixin fetchIncHead
+  mixin fetchAddSlot
+  mixin getPtr
+  mixin advHead
+  var res: T
+
   doAssert not queue.isNil(), "The queue has not been initialised"
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
@@ -343,9 +347,10 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
       when T is object:
-        return default(T)
+        res = default(T)
+        break
       else:
-        return nil
+        break
 
     var head = queue.fetchIncHead()
     if likely(head.tag < loonySlotCount):
@@ -371,9 +376,9 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # cache lines with atomic writes and loads rather than requiring a
           # CPU to completely commit its STOREBUFFER
 
-          result = cast[T](prev and SLOTMASK)
+          res = cast[T](prev and SLOTMASK)
           when T is ref:
-            GC_unref result # We incref on the push, so we have to make sure to
+            GC_unref res # We incref on the push, so we have to make sure to
                             # to decref or we will get memory leaks
           break
     else:
@@ -383,14 +388,47 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
         discard
       of QueueEmpty:
         break
+  res
 
-proc pop*[T](queue: LoonyQueue[T]): T =
+template popImpl[T](queue: SCLoonyQueue[T]; forcedCoherance: static bool = false): T =
+  doAssert not queue.isNil(), "The queue has not been initialised"
+  var res: T
+  while true:
+    var tail = queue.tail.load(Rlx)
+    var head = queue.head
+    if isEmptyImpl(head, tail):
+      when T is object:
+        res = default(T)
+      break
+    elif likely(head.tag < loonySlotCount):
+      var prev = head.fetchAddSlot READER
+      if not unlikely((prev and SLOTMASK) == 0) and (prev and spec.WRITER) != 0:
+        when forcedCoherance:
+          atomicThreadFence(ATOMIC_ACQUIRE)
+        
+        res = cast[T](prev and SLOTMASK)
+        when T is ref:
+          GC_unref res
+        queue.head += 1
+        break
+    else:
+      if head.getTag == loonySlotCount:
+        tryReclaim(h.getPtr, 0'u8)
+      if tail.getPtr == head.getPtr:
+        break
+      else:
+        var next = head.getPtr.next.load(Rlx)
+        queue.head = cast[TagPtr](next)
+    res
+
+
+proc pop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePop to avoid this cost.
   popImpl(queue, forcedCoherance = true)
-proc unsafePop*[T](queue: LoonyQueue[T]): T =
+proc unsafePop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## Unlike pop, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the caller has old cached memory that is
@@ -443,3 +481,9 @@ proc newLoonyQueue*[T](): LoonyQueue[T] =
   ## Return an intialized LoonyQueue.
   new result
   initLoonyQueue result
+
+proc newSCLoonyQueue*[T](): SCLoonyQueue[T] =
+  new result
+  result.head = cast[TagPtr](allocNode())
+  result.tail = result.head
+  result.currTail = result.tail
