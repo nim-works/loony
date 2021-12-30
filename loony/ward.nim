@@ -303,7 +303,7 @@ proc clearImpl[T](queue: LoonyQueue[T]) =
       # deallocated them
       if head.nptr == newNode.nptr:
         break done
-      for i in 0..<N:
+      for i in 0..<loonySlotCount:
         # For every slot in the heads slot, load the value
         var slot = head.node.slots[i].load(moRelaxed)
         # If the slot has been consumed then we will move on (its already been derefd)
@@ -346,7 +346,7 @@ proc countImpl[T](queue: LoonyQueue[T]): int =
   var (currHead, currTail) = queue.maneAndTail()
   if not currHead.nptr == head.nptr:
     dec nodes
-  result = nodes * N + (N - currHead.idx) + currTail.idx
+  result = nodes * loonySlotCount + (loonySlotCount - currHead.idx) + currTail.idx
 
 proc count*[T, F](ward: Ward[T, F]) =
   ## Does as labelled on the bottle. The nature of loony queue means that the returned
