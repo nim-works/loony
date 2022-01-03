@@ -445,6 +445,7 @@ proc unsafePop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
     popImpl(queue, forcedCoherance = false)
   else:
     popImplSC(queue, forcedCoherance = false)
+    
 #[
   Consumed slots have been written to and then read. If a concurrent
   deque operation outpaces the corresponding enqueue operation then both
@@ -493,6 +494,8 @@ proc newLoonyQueue*[T](): LoonyQueue[T] =
   initLoonyQueue result
 
 proc newSCLoonyQueue*[T](): SCLoonyQueue[T] =
+  ## Experimental single consumer LoonyQueue; naive benchmarking does not
+  ## demonstrate any benefit however.
   new result
   let nptr = allocNode()
   result.head = cast[TagPtr](nptr)
