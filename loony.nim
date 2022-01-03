@@ -390,7 +390,11 @@ template popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false):
         break
   res
 
-template popImpl[T](queue: SCLoonyQueue[T]; forcedCoherance: static bool = false): T =
+template popImplSC[T](queue: SCLoonyQueue[T]; forcedCoherance: static bool = false): T =
+  mixin load
+  mixin fetchAddSlot
+  mixin getTag
+  mixin getPtr
   doAssert not queue.isNil(), "The queue has not been initialised"
   var res: T
   while true:
@@ -409,17 +413,18 @@ template popImpl[T](queue: SCLoonyQueue[T]; forcedCoherance: static bool = false
         res = cast[T](prev and SLOTMASK)
         when T is ref:
           GC_unref res
-        queue.head += 1
+        queue.head.tag += 1
         break
     else:
       if head.getTag == loonySlotCount:
-        tryReclaim(h.getPtr, 0'u8)
+        tryReclaim(head.getPtr, 0'u8)
       if tail.getPtr == head.getPtr:
+        queue.head.tag += 1
         break
       else:
         var next = head.getPtr.next.load(Rlx)
         queue.head = cast[TagPtr](next)
-    res
+  res
 
 
 proc pop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
@@ -427,14 +432,19 @@ proc pop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePop to avoid this cost.
-  popImpl(queue, forcedCoherance = true)
+  when queue is LoonyQueue:
+    popImpl(queue, forcedCoherance = true)
+  else:
+    popImplSC(queue, forcedCoherance = true)
 proc unsafePop*[T](queue: LoonyQueue[T] | SCLoonyQueue[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## Unlike pop, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the caller has old cached memory that is
   ## related to the item.
-  popImpl(queue, forcedCoherance = false)
-
+  when queue is LoonyQueue:
+    popImpl(queue, forcedCoherance = false)
+  else:
+    popImplSC(queue, forcedCoherance = false)
 #[
   Consumed slots have been written to and then read. If a concurrent
   deque operation outpaces the corresponding enqueue operation then both
@@ -484,6 +494,7 @@ proc newLoonyQueue*[T](): LoonyQueue[T] =
 
 proc newSCLoonyQueue*[T](): SCLoonyQueue[T] =
   new result
-  result.head = cast[TagPtr](allocNode())
+  let nptr = allocNode()
+  result.head = cast[TagPtr](nptr)
   result.tail = result.head
-  result.currTail = result.tail
+  result.currTail = nptr

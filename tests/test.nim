@@ -4,7 +4,6 @@ import std/logging
 import std/atomics
 import std/os
 import std/macros
-import benchy
 
 import balls
 import cps
@@ -12,9 +11,9 @@ import cps
 import loony
 
 const
-  continuationCount = 200
+  continuationCount = when defined(windows): 10_000 else: 10_000
 let
-  threadCount = 12
+  threadCount = when defined(danger): countProcessors() else: 1
 
 type
   C = ref object of Continuation
@@ -80,52 +79,50 @@ template expectCounter(n: int): untyped =
     checkpoint "expected: ", n
     raise
 
-timeIt("do the things", 500):
+suite "loony":
   block:
-    block:
-      ## creation and initialization of the queue
+    ## creation and initialization of the queue
 
-      # Moment of truth
-      q = initLoonyQueue[Continuation]()
+    # Moment of truth
+    q = initLoonyQueue[Continuation]()
 
-    
-    # block:
-    #   ## run some continuations through the queue in another thread
-    #   when defined(danger): skip "boring"
-    #   var thr: Thread[void]
+  block:
+    ## run some continuations through the queue in another thread
+    when defined(danger): skip "boring"
+    var thr: Thread[void]
 
-    #   counter.store 0
-    #   dumpAllocStats:
-    #     for i in 0 ..< continuationCount:
-    #       var c = whelp doContinualThings()
-    #       discard enqueue c
-    #     createThread(thr, runThings)
-    #     joinThread thr
-    #     expectCounter continuationCount
+    counter.store 0
+    dumpAllocStats:
+      for i in 0 ..< continuationCount:
+        var c = whelp doContinualThings()
+        discard enqueue c
+      createThread(thr, runThings)
+      joinThread thr
+      expectCounter continuationCount
 
-    block:
-      ## run some continuations through the queue in many threads
-      when not defined(danger): skip "slow"
-      var threads: seq[Thread[void]]
-      newSeq(threads, threadCount)
+  block:
+    ## run some continuations through the queue in many threads
+    when not defined(danger): skip "slow"
+    var threads: seq[Thread[void]]
+    newSeq(threads, threadCount)
 
-      counter.store 0
-      # dumpAllocStats:
+    counter.store 0
+    dumpAllocStats:
       debugNodeCounter:
         # If `loonyDebug` is defined this will output number of nodes you started
         # with - the number of nodes you end with (= non-deallocated nodes)
         for i in 0 ..< continuationCount:
           var c = whelp doContinualThings()
           discard enqueue c
-        # checkpoint "queued $# continuations" % [ $continuationCount ]
+        checkpoint "queued $# continuations" % [ $continuationCount ]
 
         for thread in threads.mitems:
           createThread(thread, runThings)
-        # checkpoint "created $# threads" % [ $threadCount ]
+        checkpoint "created $# threads" % [ $threadCount ]
 
         for thread in threads.mitems:
           joinThread thread
-        # checkpoint "joined $# threads" % [ $threadCount ]
+        checkpoint "joined $# threads" % [ $threadCount ]
 
 
-        # expectCounter continuationCount
+        expectCounter continuationCount
