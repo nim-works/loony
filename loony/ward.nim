@@ -16,11 +16,12 @@
 ## queue but with separate flags and flag switches. Or you can have separate wards
 ## pointing to the same, with separate flags but THE SAME flag switches.
 
+import loony/utils/atomics as atms
 import loony/spec {.all.}
 import loony/node {.all.}
 import loony {.all.}
 
-import loony/utils/futex
+import pkg/futexes
 
 import std/atomics
 import std/setutils
@@ -258,97 +259,98 @@ proc isPushPaused*[T, F](ward: Ward[T, F]): bool =
   ## Raises an error if the ward flags do not support this operation.
   ward.isImpl {PushPausable}
 
-proc clearImpl[T](queue: LoonyQueue[T]) =
-  var newNode = allocNode()
-  # load the tail
-  var currTail = queue.fetchTail()
-  # Load the tails next node
-  var tailNext = currTail.node.fetchNext()
-  # New nodes will not have the next node set
-  # If it has been set then the queue is in the process of having
-  # the tail changed and we will continuosly load it until we get the nil next
-  while not cast[ptr Node](tailNext).isNil():
-    currTail = queue.fetchTail()
-    tailNext = currTail.node.fetchNext()
-  # We will replace the tails next node with our newNode. This ensures any ops
-  # that were about to try and set a new node are prevented and will instead
-  # help us to add our new node
-  while not currTail.node.compareAndSwapNext(tailNext, newNode):
-    # If it doesnt work then we must have just been beaten to it, load the next
-    # node and swap that instead
-    currTail = queue.fetchTail()
-  # TODO I feel that I have to ensure that if I run into the situation where I have
-  # intercepted threads setting new nodes, that memory reclamation occurs as it should
+# TODO - need to reimplement with the new atomics
+# proc clearImpl[T](queue: LoonyQueue[T]) =
+#   var newNode = allocNode()
+#   # load the tail
+#   var currTail = queue.fetchTail()
+#   # Load the tails next node
+#   var tailNext = currTail.node.fetchNext()
+#   # New nodes will not have the next node set
+#   # If it has been set then the queue is in the process of having
+#   # the tail changed and we will continuosly load it until we get the nil next
+#   while not cast[ptr Node](tailNext).isNil():
+#     currTail = queue.fetchTail()
+#     tailNext = currTail.node.fetchNext()
+#   # We will replace the tails next node with our newNode. This ensures any ops
+#   # that were about to try and set a new node are prevented and will instead
+#   # help us to add our new node
+#   while not currTail.node.compareAndSwapNext(tailNext, newNode):
+#     # If it doesnt work then we must have just been beaten to it, load the next
+#     # node and swap that instead
+#     currTail = queue.fetchTail()
+#   # TODO I feel that I have to ensure that if I run into the situation where I have
+#   # intercepted threads setting new nodes, that memory reclamation occurs as it should
 
-  # Now I will swap the queues current tail with the new tail that we set.
-  # If it doesn't work its probably because another thread did a pop and changed
-  # the index so I will keep increasing the currTail index until it is successful
-  # REVIEW I might just do a store at this point instead of a CAS
-  while not queue.compareAndSwapTail(currTail, newNode):
-    currTail += 1
-  # Get the head node
-  var head = queue.fetchHead()
-  # We will try straight up swap the head node with our new node
-  while not queue.compareAndSwapHead(head, newNode):
-    # Keep updating the head node till it works
-    head = queue.fetchHead()
-    # TODO will have to do a check here to see if the head is
-    # the same as our newNode in which case can just stop
+#   # Now I will swap the queues current tail with the new tail that we set.
+#   # If it doesn't work its probably because another thread did a pop and changed
+#   # the index so I will keep increasing the currTail index until it is successful
+#   # REVIEW I might just do a store at this point instead of a CAS
+#   while not queue.compareAndSwapTail(currTail, newNode):
+#     currTail += 1
+#   # Get the head node
+#   var head = queue.fetchHead()
+#   # We will try straight up swap the head node with our new node
+#   while not queue.compareAndSwapHead(head, newNode):
+#     # Keep updating the head node till it works
+#     head = queue.fetchHead()
+#     # TODO will have to do a check here to see if the head is
+#     # the same as our newNode in which case can just stop
 
-  # Now we can begin clearing the nodes
-  block done:
-    while true:
-      # Check if the head is the same as our newNode in which
-      # case we have already cleared all the previous nodes and
-      # deallocated them
-      if head.nptr == newNode.nptr:
-        break done
-      for i in 0..<loonySlotCount:
-        # For every slot in the heads slot, load the value
-        var slot = head.node.slots[i].load(moRelaxed)
-        # If the slot has been consumed then we will move on (its already been derefd)
-        if not (slot and CONSUMED):
-          # Slot hasnt been consumed so we will load it
-          var el = cast[T](slot and SLOTMASK)
-          # If slot is not a nil ref then we will unref it
-          when T is ref:
-            if not el.isNil:
-              GC_unref el
-      # After unrefing the slots, we will load the next node in the list
-      var dehead = deepCopy(head)
-      head = head.node.fetchNext()
-      # Deallocate the consumed node
-      deallocNode(dehead.nptr)
+#   # Now we can begin clearing the nodes
+#   block done:
+#     while true:
+#       # Check if the head is the same as our newNode in which
+#       # case we have already cleared all the previous nodes and
+#       # deallocated them
+#       if head.nptr == newNode.nptr:
+#         break done
+#       for i in 0..<loonySlotCount:
+#         # For every slot in the heads slot, load the value
+#         var slot = head.node.slots[i].load(moRelaxed)
+#         # If the slot has been consumed then we will move on (its already been derefd)
+#         if not (slot and CONSUMED):
+#           # Slot hasnt been consumed so we will load it
+#           var el = cast[T](slot and SLOTMASK)
+#           # If slot is not a nil ref then we will unref it
+#           when T is ref:
+#             if not el.isNil:
+#               GC_unref el
+#       # After unrefing the slots, we will load the next node in the list
+#       var dehead = deepCopy(head)
+#       head = head.node.fetchNext()
+#       # Deallocate the consumed node
+#       deallocNode(dehead.nptr)
 
-  # and now hopefully  nothing bad happens.
+#   # and now hopefully  nothing bad happens.
 
-proc clear*[T, F](ward: Ward[T, F]) =
-  ## UNSTABLE/UNTESTED
-  ## Clears the loonyQueue. This does not block any threads which are pushing/popping
-  ## off the queue. It will be performed safely, however if you want a deterministic
-  ## clear of the queue, it is recommended to have all threads pushing/popping through
-  ## a ward with a Pause flag to call before you clear the queue.
-  when Clearable in ward.flags:
-    ward.queue.clearImpl()
-  else:
-    raise ValueError.newException:
-      "This ward does not have the Clearable flag set"
+# proc clear*[T, F](ward: Ward[T, F]) =
+#   ## UNSTABLE/UNTESTED
+#   ## Clears the loonyQueue. This does not block any threads which are pushing/popping
+#   ## off the queue. It will be performed safely, however if you want a deterministic
+#   ## clear of the queue, it is recommended to have all threads pushing/popping through
+#   ## a ward with a Pause flag to call before you clear the queue.
+#   when Clearable in ward.flags:
+#     ward.queue.clearImpl()
+#   else:
+#     raise ValueError.newException:
+#       "This ward does not have the Clearable flag set"
 
-proc countImpl[T](queue: LoonyQueue[T]): int =
-  var head = queue.fetchHead()
-  var nodes: int
-  var andysBalls: TagPtr = head
-  while true:
-    andysBalls = andysBalls.node.next.load(moRelaxed)
-    if andysBalls == 0'u:
-      break
-    inc nodes
-  var (currHead, currTail) = queue.maneAndTail()
-  if not currHead.nptr == head.nptr:
-    dec nodes
-  result = nodes * loonySlotCount + (loonySlotCount - currHead.idx) + currTail.idx
+# proc countImpl[T](queue: LoonyQueue[T]): int =
+#   var head = queue.fetchHead()
+#   var nodes: int
+#   var andysBalls: TagPtr = head
+#   while true:
+#     andysBalls = andysBalls.node.next.load(moRelaxed)
+#     if andysBalls == 0'u:
+#       break
+#     inc nodes
+#   var (currHead, currTail) = queue.maneAndTail()
+#   if not currHead.nptr == head.nptr:
+#     dec nodes
+#   result = nodes * loonySlotCount + (loonySlotCount - currHead.idx) + currTail.idx
 
-proc count*[T, F](ward: Ward[T, F]) =
-  ## Does as labelled on the bottle. The nature of loony queue means that the returned
-  ## value is not 100% accurate when there is high contention/activity on the queue.
-  countImpl ward.queue
+# proc count*[T, F](ward: Ward[T, F]) =
+#   ## Does as labelled on the bottle. The nature of loony queue means that the returned
+#   ## value is not 100% accurate when there is high contention/activity on the queue.
+#   countImpl ward.queue
