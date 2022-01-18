@@ -347,7 +347,7 @@ template popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false):
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
       when T is object:
-        res = default(T)
+        res = default(typedesc T)
         break
       else:
         break
@@ -402,7 +402,7 @@ template popImplSC[T](queue: SCLoonyQueue[T]; forcedCoherance: static bool = fal
     var head = queue.head
     if isEmptyImpl(head, tail):
       when T is object:
-        res = default(T)
+        res = default(typedesc T)
       break
     elif likely(head.tag < loonySlotCount):
       var prev = head.fetchAddSlot READER
