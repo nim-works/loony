@@ -145,3 +145,40 @@ We recommend against changing these values unless you know what you are doing. T
 ## What are Continuations?
 
 If you've somehow missed the next big thing for nim; see [CPS](https://github.com/nim-works/cps)
+
+## Fixing ARC to make passing references safe
+
+Operations for arc can be naively made atomic to assure a higher level of safety.
+
+An example of such an implementation can be found in "failtests/arcfix_example/arc.nim"
+
+This naive implementation is used in all benchmarks.
+
+## Benchmarks
+
+Raise an issue if you would like your queue to be benchmarked against loony.
+
+> I don't currently see any implementations of queues which compare to loony in throughput and ease of use.
+
+### [Sync - SPSC](https://github.com/planetis-im/sync)
+
+Issues:
+
+- Inflexible queue that cannot be compared to loony in any real word application (sync_spsc does not compile).
+- SPSC, therefore have to compare loony which is a dynamic MPMC queue to a capped SPSC queue.
+  - To balance this out, the queues are compared without loony having to perform dynamic allocations of nodes (no more than 1024 items passed)
+- Note that these tests are 100% push followed by 100% pull; there is no concurrency between the operations.
+
+Results:
+
+```
+name ............................... min time      avg time    std dv   runs
+Loony .............................. 1.018 ms      1.154 ms    ±0.035  x10000
+Sync Spsc .......................... 1.039 ms      1.151 ms    ±0.055  x10000
+```
+
+### [Threading - Chann](https://github.com/nim-lang/threading)
+
+Issues:
+
+- Can't get it to compile; any help would be appreciated.

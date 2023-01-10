@@ -1,8 +1,6 @@
-import std/atomics
-
 const
-  loonyNodeAlignment {.intdefine.} = 11
-  loonySlotCount {.intdefine.} = 1024
+  loonyNodeAlignment* {.intdefine.} = 11
+  loonySlotCount* {.intdefine.} = 1024   # Number of slots per node in the queue
 
 doAssert (1 shl loonyNodeAlignment) > loonySlotCount, "Your LoonySlot count exceeds your alignment!"
 
@@ -18,8 +16,6 @@ const
   DEQ*      =   uint8(1 shl 1) # 0000_0010
   ENQ*      =   uint8(1 shl 2) # 0000_0100
   #
-  N*        =         loonySlotCount      # Number of slots per node in the queue
-  #
   TAGBITS*   : uint = loonyNodeAlignment  # Each node must be aligned to this value
   NODEALIGN* : uint = 1 shl TAGBITS       # in order to store the required number of
   TAGMASK*   : uint = NODEALIGN - 1       # tag bits in every node pointer
@@ -31,47 +27,68 @@ const
   SLOTMASK*  : uint = high(uint) xor (RESUME or WRITER or READER)
 
 type
-  NodePtr* = uint
-  TagPtr* = uint  ##
-    ## Aligned pointer with 12 bit prefix containing the tag.
-    ## Access using procs nptr and idx
-  ControlMask* = uint32
+  Node* {.byref.} = object
+    slots* : array[loonySlotCount, uint]  # Pointers to object
+    next*  : ptr Node            # NodePtr - successor node
+    ctrl*  : ControlBlock               # Control block for mem recl  NodePtr* = uint
 
+  #[
+    While bigE and littleE are being handled in the object definitions, they are
+    not fully supported yet in the library code. This will require further work
+    however the base is being set.
+  ]#
+  TagPtr* {.byref.} = object
+    when littleEndian == cpuEndian:
+      tag* {.bitsize: (loonyNodeAlignment).}: uint
+      pntr* {.bitsize: (64 - loonyNodeAlignment).}: uint
+    else:
+      pntr* {.bitsize: (64 - loonyNodeAlignment).}: uint
+      tag* {.bitsize: (loonyNodeAlignment).}: uint
+      ## Aligned pointer with 12 bit prefix containing the tag.
+      ## Access using procs getPtr and getTag
+  ControlMask* {.byref.} = object
+    when littleEndian == cpuEndian:
+      lower* {.bitsize: 16.}: uint16
+      upper* {.bitsize: 16.}: uint16
+    else:
+      upper* {.bitsize: 16.}: uint16
+      lower* {.bitsize: 16.}: uint16
   ## Control block for memory reclamation
-  ControlBlock* = object
+  ControlBlock* {.byref.} = object
     ## high uint16 final observed count of slow-path enqueue ops
     ## low uint16: current count
-    headMask* : Atomic[ControlMask]     # (uint16, uint16)  4 bytes
+    headMask* : ControlMask     # (uint16, uint16)  4 bytes
     ## high uint16, final observed count of slow-path dequeue ops,
     ## low uint16: current count
-    tailMask* : Atomic[ControlMask]     # (uint16, uint16)  4 bytes
+    tailMask* : ControlMask     # (uint16, uint16)  4 bytes
     ## Bitmask for storing current reclamation status
     ## All 3 bits set = node can be reclaimed
-    reclaim*  : Atomic[uint8]     #                   1 byte
+    reclaim*  : uint8     #                   1 byte
 
-proc getHigh*(mask: ControlMask): uint16 =
-  (mask shr SHIFT).uint16
+# Define sizeof funcs for objects else nim will be unable to compile since sizeof
+# imported func cannot be called on incomplete structs in C.
+proc sizeof*(td: TagPtr): int {.compileTime.} = 8
+proc sizeof*(td: ControlMask): int {.compileTime.} = 4
 
-proc getLow*(mask: ControlMask): uint16 =
-  mask.uint16
+template getTag*(tptr: TagPtr): uint =
+  tptr.tag
+template getPtr*(tptr: TagPtr): ptr Node =
+  cast[ptr Node](cast[uint](tptr) and PTRMASK)
 
-proc fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moRelease): ControlMask =
-  ctrl.tailMask.fetchAdd(v, order = moorder)
+converter toUint*(x: TagPtr): uint = cast[uint](x)
+converter toTagPtr*(x: uint): TagPtr = cast[TagPtr](x)
+converter toUint32*(x: ControlMask): uint32 = cast[uint32](x)
+converter toCtrlMask*(x: uint32): ControlMask = cast[ControlMask](x)
+converter toUint*(x: ptr Node): uint = cast[uint](x)
+converter toNodePtr*(x: uint): ptr Node = cast[ptr Node](x)
 
-proc fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, moorder: MemoryOrder = moRelease): ControlMask =
-  ctrl.headMask.fetchAdd(v, order = moorder)
+include loony/utils/atomics
 
-proc fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, moorder: MemoryOrder = moAcquireRelease): uint8 =
-  ctrl.reclaim.fetchAdd(v, order = moorder)
+template fetchAddTail*(ctrl: var ControlBlock, v: uint32 = 1, moorder = Rel): ControlMask =
+  ctrl.tailMask.fetchAdd(v, moorder)
 
-when defined(loonyDebug):
-  import std/logging
-  export debug, info, notice, warn, error, fatal
-else:
-  # use the `$` converter just to ensure that debugging statements compile
-  template debug*(args: varargs[untyped, `$`]): untyped = discard
-  template info*(args: varargs[untyped, `$`]): untyped = discard
-  template notice*(args: varargs[untyped, `$`]): untyped = discard
-  template warn*(args: varargs[untyped, `$`]): untyped = discard
-  template error*(args: varargs[untyped, `$`]): untyped = discard
-  template fatal*(args: varargs[untyped, `$`]): untyped = discard
+template fetchAddHead*(ctrl: var ControlBlock, v: uint32 = 1, moorder = Rel): ControlMask =
+  ctrl.headMask.fetchAdd(v, moorder)
+
+template fetchAddReclaim*(ctrl: var ControlBlock, v: uint8 = 1, moorder = AcqRel): uint8 =
+  ctrl.reclaim.fetchAdd(v, moorder)
