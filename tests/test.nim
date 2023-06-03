@@ -124,5 +124,4 @@ suite "loony":
           joinThread thread
         checkpoint "joined $# threads" % [ $threadCount ]
 
-
         expectCounter continuationCount

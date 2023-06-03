@@ -85,7 +85,6 @@ proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
 proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
-
 template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
 
@@ -134,7 +133,6 @@ proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
         slotval = slotptr[]
       else:
         slotval = 0'u
-        
 
     template truthy: bool =
       (cast[NodePtr](tailNode), tailIdx) == headNodeIdx
@@ -144,14 +142,12 @@ proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
       else:
         tailIdx <= headNodeIdx[1]
 
-
     getHead()
     getTail()
     if (loadedLine mod 64) != 0:
       loadedLine = loadedLine - (loadedLine mod 64)
 
     while not truthy:
-      
       while idxTruthy:
         loadSlot()
         if (slotval and spec.WRITER) == spec.WRITER:
@@ -235,10 +231,6 @@ proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
         result = AdvOnly
         break done
 
-
-
-
-
 proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   if h.idx == N:
     # This should reliably trigger reclamation of the node memory on the last
@@ -292,15 +284,15 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
 ]#
 
 proc pushImpl[T](queue: LoonyQueue[T], el: T,
-                    forcedCoherance: static bool = false) =
-  doAssert not queue.isNil(), "The queue has not been initialised"
+                    forcedCoherence: static bool = false) =
+  doAssert not queue.isNil(), "The queue has not been initialized"
   # Begin by tagging pointer el with WRITER bit and increasing the ref
   # count if necessary
   var pel = prepareElement el
   # Ensure all writes in STOREBUFFER are committed. By far the most costly
-  # primitive; it will be preferred while proving safety before working towards
-  # optimisation by atomic reads/writes of cache lines related to el
-  when forcedCoherance:
+  # primitive; it will be preferred while proving safety before working
+  # towards optimization by atomic reads/writes of cache lines related to el
+  when forcedCoherence:
     atomicThreadFence(ATOMIC_RELEASE)
   while true:
     # Enq proc begins with incr the index of node in TagPtr
@@ -342,13 +334,14 @@ proc push*[T](queue: LoonyQueue[T], el: T) =
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePush to avoid this cost.
-  pushImpl(queue, el, forcedCoherance = true)
+  pushImpl(queue, el, forcedCoherence = true)
+
 proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
   ## Push an item onto the end of the LoonyQueue.
   ## Unlike push, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the receiving thread has old cached memory
   ## related to this element
-  pushImpl(queue, el, forcedCoherance = false)
+  pushImpl(queue, el, forcedCoherence = false)
 
 proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
   if head.idx >= N or head.idx >= tail.idx:
@@ -360,7 +353,7 @@ proc isEmpty*(queue: LoonyQueue): bool =
   let (head, tail) = maneAndTail queue
   isEmptyImpl(head, tail)
 
-proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
+proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
   doAssert not queue.isNil(), "The queue has not been initialised"
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
@@ -387,7 +380,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherance: static bool = false): T =
           # Ideally before retrieving the ref object itself, we want to allow
           # CPUs to communicate cache line changes and resolve invalidations
           # to dirty memory.
-          when forcedCoherance:
+          when forcedCoherence:
             atomicThreadFence(ATOMIC_ACQUIRE)
           # CPU halt and clear STOREBUFFER; overwritten cache lines will be
           # syncd and invalidated ensuring fresh memory from this point in line
@@ -415,17 +408,18 @@ proc pop*[T](queue: LoonyQueue[T]): T =
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePop to avoid this cost.
-  popImpl(queue, forcedCoherance = true)
+  popImpl(queue, forcedCoherence = true)
+
 proc unsafePop*[T](queue: LoonyQueue[T]): T =
   ## Remove and return to the caller the next item in the LoonyQueue.
   ## Unlike pop, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the caller has old cached memory that is
   ## related to the item.
-  popImpl(queue, forcedCoherance = false)
+  popImpl(queue, forcedCoherence = false)
 
 #[
   Consumed slots have been written to and then read. If a concurrent
-  deque operation outpaces the corresponding enqueue operation then both
+  dequeue operation outpaces the corresponding enqueue operation then both
   operations have to abandon and try again. Once all slots in the node
   have been consumed or abandoned, the node is considered drained and
   unlinked from the list. Node can be reclaimed and de-allocated.
@@ -441,9 +435,6 @@ proc unsafePop*[T](queue: LoonyQueue[T]): T =
   Requires a sufficient number of available bits that are not used to
   present the nodes addresses themselves.
 ]#
-
-      
-      
 
 proc initLoonyQueue*(q: LoonyQueue) =
   ## Initialize an existing LoonyQueue.
