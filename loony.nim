@@ -283,9 +283,9 @@ proc advHead(queue: LoonyQueue; curr, h, t: var TagPtr): AdvHead =
   determining the order in which two operations occured possible.
 ]#
 
-proc pushImpl[T](queue: LoonyQueue[T], el: T,
+proc pushImpl[T](queue: LoonyQueue[T], el: sink T,
                     forcedCoherence: static bool = false) =
-  doAssert not queue.isNil(), "The queue has not been initialized"
+  assert not queue.isNil(), "The queue has not been initialized"
   # Begin by tagging pointer el with WRITER bit and increasing the ref
   # count if necessary
   var pel = prepareElement el
@@ -329,14 +329,14 @@ proc pushImpl[T](queue: LoonyQueue[T], el: T,
 
 
 
-proc push*[T](queue: LoonyQueue[T], el: T) =
+proc push*[T](queue: LoonyQueue[T], el: sink T) =
   ## Push an item onto the end of the LoonyQueue.
   ## This operation ensures some level of cache coherency using atomic thread fences.
   ##
   ## Use unsafePush to avoid this cost.
   pushImpl(queue, el, forcedCoherence = true)
 
-proc unsafePush*[T](queue: LoonyQueue[T], el: T) =
+proc unsafePush*[T](queue: LoonyQueue[T], el: sink T) =
   ## Push an item onto the end of the LoonyQueue.
   ## Unlike push, this operation does not use atomic thread fences. This means you
   ## may get undefined behaviour if the receiving thread has old cached memory
@@ -354,17 +354,17 @@ proc isEmpty*(queue: LoonyQueue): bool =
   isEmptyImpl(head, tail)
 
 proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
-  doAssert not queue.isNil(), "The queue has not been initialised"
+  assert not queue.isNil(), "The queue has not been initialised"
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
     var (tail, curr) = tailAndMane queue
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
-      when T is object:
-        return default(T)
-      else:
+      when T is ref or T is ptr:
         return nil
+      else:
+        return default(T)
 
     var head = queue.fetchIncHead()
     if likely(head.idx < N):
