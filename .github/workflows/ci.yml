@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: ci
 
@@ -67,12 +67,20 @@ jobs:
           path: nim
           version: ${{ matrix.nim }}
 
-      - name: Run tests
+      - name: Dependencies
         shell: bash
         run: |
           cd ci
+          nimble --accept install "https://github.com/nim-works/cps"
+          nimble --accept install "https://github.com/disruptek/balls"
           nimble --accept develop
-          nimble test
+
+      - name: Tests
+        shell: bash
+        run: |
+          cd ci
+          balls --gc:arc --backend:c --define:danger --define:release
+
       - name: Build docs
         if: ${{ matrix.docs }} == 'true'
         shell: bash
@@ -90,12 +98,12 @@ jobs:
             '--git.url:https://github.com/${{ github.repository }}' \
             '--git.commit:${{ github.sha }}' \
             "--git.devel:$branch" \
-            loony/ward.nim 
+            loony/ward.nim
           cp docs/{the,}index.html || true
       - name: Publish docs
         if: >
           github.event_name == 'push' && github.ref == 'refs/heads/master' &&
-          matrix.os == 'macos-latest' && matrix.nim == 'devel'
+          matrix.os == 'ubuntu-latest' && matrix.nim == 'devel'
         uses: crazy-max/ghaction-github-pages@v2.5.0
         with:
           build_dir: ci/docs
