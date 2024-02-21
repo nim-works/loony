@@ -107,7 +107,8 @@ template compareAndSwapNext*(t: Node, expect: var uint, swap: uint): bool =
   t.next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
 
 template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: uint): bool =
-  (toNode t).next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
+  # cpp impl is Relaxed; we use Release here to remove tsan warning
+  (toNode t).next.compareExchange(expect, swap, moRelease)
 
 proc `=destroy`*(n: var Node) =
   decDebugCounter()
