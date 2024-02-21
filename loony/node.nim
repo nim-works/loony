@@ -1,5 +1,7 @@
 import std/atomics
 
+import pkg/arc
+
 import loony/spec
 import loony/memalloc
 
@@ -80,19 +82,24 @@ template toUInt*(nodeptr: ptr Node): uint =
   # Equivalent to toNodePtr
   cast[uint](nodeptr)
 
-proc prepareElement*[T](el: sink T): uint =
-  ## Prepare an item to be taken into the queue; we bump the RC first to
-  ## ensure that no other operations free it, then add the WRITER bit.
+proc prepareElement*[T](el: var T): uint =
+  ## Prepare an item for the queue: ensure that no other threads will free
+  ## it, then turn it into an integer and add the WRITER bit.
   when T is ref:
-    GC_ref el
+    let owners = atomicRC(el, ATOMIC_ACQUIRE)
+    when loonyIsolated:
+      if owners != 0:
+        raise AssertionDefect.newException:
+          "pushed ref shared by " & $(1 + owners) & " owners"
   result = cast[uint](el) or WRITER
+  wasMoved el
 
 proc fetchNext*(node: var Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
-  cast[NodePtr](node.next.load(order = moorder))
+  load(node.next, order = moorder)
 
 proc fetchNext*(node: NodePtr, moorder: MemoryOrder = moAcquireRelease): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
-  (toNode node).next.load(order = moorder)
+  fetchNext(node.toNode)
 
 proc fetchAddSlot*(t: var Node, idx: uint16, w: uint, moorder: MemoryOrder = moAcquireRelease): uint =
   ## Fetches the pointer to the object in the slot while atomically

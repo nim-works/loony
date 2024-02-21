@@ -5,6 +5,8 @@
 
 import std/atomics
 
+import pkg/arc
+
 import loony/spec
 import loony/node
 
@@ -389,10 +391,19 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
           # cache lines with atomic writes and loads rather than requiring a
           # CPU to completely commit its STOREBUFFER
 
-          result = cast[T](prev and SLOTMASK)
+          result = cast[T](prev and SLOTMASK)  # cast is effectively GC_ref
           when T is ref:
-            GC_unref result # We incref on the push, so we have to make sure to
-                            # to decref or we will get memory leaks
+            # ideally, no one knows about this reference, so we'll
+            # make an adjustment here to counter the cast incref and
+            # afford ordering elsewhere
+            let owners = atomicDecRef(result, ATOMIC_ACQ_REL)
+            # since we have some extra information here, we'll throw
+            # in a guard which should only trigger in the event the
+            # ownership was corrupted while the ref was in the queue
+            when loonyIsolated:
+              if owners != 1:
+                raise AssertionDefect.newException:
+                  "popped ref shared by " & $owners & " owners"
           break
     else:
       # SLOW PATH OPS
