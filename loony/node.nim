@@ -87,14 +87,14 @@ proc prepareElement*[T](el: sink T): uint =
     GC_ref el
   result = cast[uint](el) or WRITER
 
-template fetchNext*(node: Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
-  node.next.load(order = moorder)
+proc fetchNext*(node: var Node, moorder: MemoryOrder = moAcquireRelease): NodePtr =
+  cast[NodePtr](node.next.load(order = moorder))
 
-template fetchNext*(node: NodePtr, moorder: MemoryOrder = moAcquireRelease): NodePtr =
+proc fetchNext*(node: NodePtr, moorder: MemoryOrder = moAcquireRelease): NodePtr =
   # get the NodePtr to the next Node, can be converted to a TagPtr of (nptr: NodePtr, idx: 0'u16)
   (toNode node).next.load(order = moorder)
 
-template fetchAddSlot*(t: Node, idx: uint16, w: uint, moorder: MemoryOrder = moAcquireRelease): uint =
+proc fetchAddSlot*(t: var Node, idx: uint16, w: uint, moorder: MemoryOrder = moAcquireRelease): uint =
   ## Fetches the pointer to the object in the slot while atomically
   ## increasing the value by `w`.
   ##
@@ -103,10 +103,10 @@ template fetchAddSlot*(t: Node, idx: uint16, w: uint, moorder: MemoryOrder = moA
   ## statuship.
   t.slots[idx].fetchAdd(w, order = moorder)
 
-template compareAndSwapNext*(t: Node, expect: var uint, swap: uint): bool =
+proc compareAndSwapNext*(t: var Node, expect: var uint, swap: uint): bool =
   t.next.compareExchange(expect, swap, moRelaxed) # MO as per cpp impl
 
-template compareAndSwapNext*(t: NodePtr, expect: var uint, swap: uint): bool =
+proc compareAndSwapNext*(t: NodePtr, expect: var uint, swap: uint): bool =
   # cpp impl is Relaxed; we use Release here to remove tsan warning
   (toNode t).next.compareExchange(expect, swap, moRelease)
 

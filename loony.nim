@@ -59,20 +59,15 @@ proc fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
-template fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
+proc fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
   TagPtr(load(queue.tail, order = moorder))
 
-template fetchHead(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
+proc fetchHead(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the head (nptr: NodePtr, idx: uint16)
   TagPtr(load(queue.head, order = moorder))
 
-template maneAndTail(queue: LoonyQueue): (TagPtr, TagPtr) =
-  (fetchHead queue, fetchTail queue)
-template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
-  (fetchTail queue, fetchHead queue)
-
-template fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
+proc fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
   # get the NodePtr of the current tail
   cast[NodePtr](load(queue.currTail, moRelaxed))
 
@@ -85,14 +80,14 @@ proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
 proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
-template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+proc compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
 
-template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+proc compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
-                                swap: uint | TagPtr): bool {.used.} =
+proc compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
+                            swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
 
 proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
@@ -343,14 +338,17 @@ proc unsafePush*[T](queue: LoonyQueue[T], el: sink T) =
   ## related to this element
   pushImpl(queue, el, forcedCoherence = false)
 
-proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
+proc isEmptyImpl(head, tail: TagPtr): bool =
   if head.idx >= N or head.idx >= tail.idx:
-    result = head.nptr == tail.nptr
+    head.nptr == tail.nptr
+  else:
+    false
 
 proc isEmpty*(queue: LoonyQueue): bool =
   ## This operation should only be used by internal code. The response for this
   ## operation is not precise.
-  let (head, tail) = maneAndTail queue
+  let head = fetchHead queue
+  let tail = fetchTail queue
   isEmptyImpl(head, tail)
 
 proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
@@ -358,7 +356,8 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
-    var (tail, curr) = tailAndMane queue
+    var tail = fetchTail queue
+    var curr = fetchHead queue
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
       when T is ref or T is ptr:
