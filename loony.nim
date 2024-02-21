@@ -5,6 +5,8 @@
 
 import std/atomics
 
+import pkg/arc
+
 import loony/spec
 import loony/node
 
@@ -59,20 +61,15 @@ proc fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
   fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
 
-template fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
+proc fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
   TagPtr(load(queue.tail, order = moorder))
 
-template fetchHead(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
+proc fetchHead(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the head (nptr: NodePtr, idx: uint16)
   TagPtr(load(queue.head, order = moorder))
 
-template maneAndTail(queue: LoonyQueue): (TagPtr, TagPtr) =
-  (fetchHead queue, fetchTail queue)
-template tailAndMane(queue: LoonyQueue): (TagPtr, TagPtr) =
-  (fetchTail queue, fetchHead queue)
-
-template fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
+proc fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
   # get the NodePtr of the current tail
   cast[NodePtr](load(queue.currTail, moRelaxed))
 
@@ -85,14 +82,14 @@ proc fetchIncTail(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
 proc fetchIncHead(queue: LoonyQueue, moorder: MemoryOrder = moAcquire): TagPtr =
   cast[TagPtr](queue.head.fetchAdd(1, order = moorder))
 
-template compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+proc compareAndSwapTail(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.tail.compareExchange(expect, swap)
 
-template compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
+proc compareAndSwapHead(queue: LoonyQueue, expect: var uint, swap: uint | TagPtr): bool =
   queue.head.compareExchange(expect, swap)
 
-template compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
-                                swap: uint | TagPtr): bool {.used.} =
+proc compareAndSwapCurrTail(queue: LoonyQueue, expect: var uint,
+                            swap: uint | TagPtr): bool {.used.} =
   queue.currTail.compareExchange(expect, swap)
 
 proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
@@ -343,14 +340,17 @@ proc unsafePush*[T](queue: LoonyQueue[T], el: sink T) =
   ## related to this element
   pushImpl(queue, el, forcedCoherence = false)
 
-proc isEmptyImpl(head, tail: TagPtr): bool {.inline.} =
+proc isEmptyImpl(head, tail: TagPtr): bool =
   if head.idx >= N or head.idx >= tail.idx:
-    result = head.nptr == tail.nptr
+    head.nptr == tail.nptr
+  else:
+    false
 
 proc isEmpty*(queue: LoonyQueue): bool =
   ## This operation should only be used by internal code. The response for this
   ## operation is not precise.
-  let (head, tail) = maneAndTail queue
+  let head = fetchHead queue
+  let tail = fetchTail queue
   isEmptyImpl(head, tail)
 
 proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
@@ -358,7 +358,8 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
   while true:
     # Before incr the deq index, init check performed to determine if queue is empty.
     # Ensure head is loaded last to keep mem hot
-    var (tail, curr) = tailAndMane queue
+    var tail = fetchTail queue
+    var curr = fetchHead queue
     if isEmptyImpl(curr, tail):
       # Queue was empty; nil can be caught in cps w/ "while cont.running"
       when T is ref or T is ptr:
@@ -390,10 +391,19 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
           # cache lines with atomic writes and loads rather than requiring a
           # CPU to completely commit its STOREBUFFER
 
-          result = cast[T](prev and SLOTMASK)
+          result = cast[T](prev and SLOTMASK)  # cast is effectively GC_ref
           when T is ref:
-            GC_unref result # We incref on the push, so we have to make sure to
-                            # to decref or we will get memory leaks
+            # ideally, no one knows about this reference, so we'll
+            # make an adjustment here to counter the cast incref and
+            # afford ordering elsewhere
+            let owners = atomicDecRef(result, ATOMIC_ACQ_REL)
+            # since we have some extra information here, we'll throw
+            # in a guard which should only trigger in the event the
+            # ownership was corrupted while the ref was in the queue
+            when loonyIsolated:
+              if owners != 1:
+                raise AssertionDefect.newException:
+                  "popped ref shared by " & $owners & " owners"
           break
     else:
       # SLOW PATH OPS

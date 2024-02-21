@@ -4,7 +4,14 @@ const
   loonyNodeAlignment {.intdefine.} = 11
   loonySlotCount {.intdefine.} = 1024
 
-doAssert (1 shl loonyNodeAlignment) > loonySlotCount, "Your LoonySlot count exceeds your alignment!"
+  loonyIsolated* {.booldefine.} = false  ## Indicate that loony should
+  ## assert that all references passing through the queue have a single
+  ## owner.  Note that in particular, child Continuations have cycles,
+  ## which will trigger a failure of this assertion.
+
+static:
+  doAssert (1 shl loonyNodeAlignment) > loonySlotCount,
+    "Your LoonySlot count exceeds your alignment!"
 
 const
   ## Slot flag constants
