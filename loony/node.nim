@@ -86,7 +86,7 @@ proc prepareElement*[T](el: var T): uint =
   ## Prepare an item for the queue: ensure that no other threads will free
   ## it, then turn it into an integer and add the WRITER bit.
   when T is ref:
-    let owners = atomicRC(el, ATOMIC_ACQUIRE)
+    let owners {.used.} = atomicRC(el, ATOMIC_ACQUIRE)
     when loonyIsolated:
       if owners != 0:
         raise AssertionDefect.newException:

@@ -396,7 +396,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
             # ideally, no one knows about this reference, so we'll
             # make an adjustment here to counter the cast incref and
             # afford ordering elsewhere
-            let owners = atomicDecRef(result, ATOMIC_ACQ_REL)
+            let owners {.used.} = atomicDecRef(result, ATOMIC_ACQ_REL)
             # since we have some extra information here, we'll throw
             # in a guard which should only trigger in the event the
             # ownership was corrupted while the ref was in the queue
