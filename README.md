@@ -17,7 +17,7 @@
 >
 >*"We didn't have a good story about migrating continuations between threads." - Disruptek*
 
-Have you ever asked yourself what would a lock-free MPMC queue look like in nim?
+Have you ever asked yourself what would a lock-free MPMC (*multi-producer multi-consumer*) queue looks like in nim?
 
 What about a lock-free MPMC queue designed on an algorithm built for speed and memory safety?
 
