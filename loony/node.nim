@@ -137,7 +137,8 @@ proc tryReclaim*(node: var Node; start: uint16) =
     for i in start..<N:
       template s: Atomic[uint] = node.slots[i]
       if (s.load(order = moAcquire) and CONSUMED) != CONSUMED:
-        var prev = s.fetchAdd(RESUME, order = moRelaxed) and CONSUMED
+        # cpp impl is Relaxed; we use Release here to remove tsan warning
+        var prev = s.fetchAdd(RESUME, order = moRelease) and CONSUMED
         if prev != CONSUMED:
           incRecPathCounter()
           break done
