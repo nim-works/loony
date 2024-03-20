@@ -59,15 +59,18 @@ proc toStrTuple*(tag: TagPtr): string =
 
 proc fetchAddSlot(tag: TagPtr; w: uint): uint =
   ## A convenience to fetchAdd the node's slot.
-  fetchAddSlot(cast[ptr Node](nptr tag)[], idx tag, w)
+  if tag == 0:
+    raise AssertionDefect.newException "tagptr was empty"
+  else:
+    result = fetchAddSlot(tag.node, idx tag, w)
 
 proc fetchTail(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the tail (nptr: NodePtr, idx: uint16)
-  TagPtr(load(queue.tail, order = moorder))
+  TagPtr load(queue.tail, order = moorder)
 
 proc fetchHead(queue: LoonyQueue, moorder: MemoryOrder = moRelaxed): TagPtr =
   ## get the TagPtr of the head (nptr: NodePtr, idx: uint16)
-  TagPtr(load(queue.head, order = moorder))
+  TagPtr load(queue.head, order = moorder)
 
 proc fetchCurrTail(queue: LoonyQueue): NodePtr {.used.} =
   # get the NodePtr of the current tail
@@ -191,11 +194,12 @@ proc advTail[T](queue: LoonyQueue[T]; pel: uint; tag: TagPtr): AdvTail =
       var next = origTail.fetchNext()
       if cast[ptr Node](next).isNil():
         # Prepare the new node with our element in it
-        var (node, null) = (allocNode pel, 0'u)  # Atomic compareExchange requires variables
+        var node = allocNode pel
+        var null: uint
         if origTail.compareAndSwapNext(null, node.toUint):
-          # Successfully inserted our node into current/original nodes next
-          # Since we have already inserted a slot, we try to replace the queues
-          # tail tagptr with the new node with an index of 1
+          # Successfully inserted our node into current/original nodes next.
+          # Since we have already inserted a slot, we try to replace the queue's
+          # tail tagptr with the new node, with an index of 1.
           while not queue.compareAndSwapTail(currTTag, node.toUint + 1):
             # Loop is not relevant to compareAndSwapStrong; consider weak swap?
             if currTTag.nptr != origTail:
@@ -396,7 +400,7 @@ proc popImpl[T](queue: LoonyQueue[T]; forcedCoherence: static bool = false): T =
             # ideally, no one knows about this reference, so we'll
             # make an adjustment here to counter the cast incref and
             # afford ordering elsewhere
-            let owners = atomicDecRef(result, ATOMIC_ACQ_REL)
+            let owners {.used.} = atomicDecRef(result, ATOMIC_ACQ_REL)
             # since we have some extra information here, we'll throw
             # in a guard which should only trigger in the event the
             # ownership was corrupted while the ref was in the queue

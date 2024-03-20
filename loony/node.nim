@@ -86,7 +86,7 @@ proc prepareElement*[T](el: var T): uint =
   ## Prepare an item for the queue: ensure that no other threads will free
   ## it, then turn it into an integer and add the WRITER bit.
   when T is ref:
-    let owners = atomicRC(el, ATOMIC_ACQUIRE)
+    let owners {.used.} = atomicRC(el, ATOMIC_ACQUIRE)
     when loonyIsolated:
       if owners != 0:
         raise AssertionDefect.newException:
@@ -137,7 +137,8 @@ proc tryReclaim*(node: var Node; start: uint16) =
     for i in start..<N:
       template s: Atomic[uint] = node.slots[i]
       if (s.load(order = moAcquire) and CONSUMED) != CONSUMED:
-        var prev = s.fetchAdd(RESUME, order = moRelaxed) and CONSUMED
+        # cpp impl is Relaxed; we use Release here to remove tsan warning
+        var prev = s.fetchAdd(RESUME, order = moRelease) and CONSUMED
         if prev != CONSUMED:
           incRecPathCounter()
           break done
