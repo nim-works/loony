@@ -76,7 +76,7 @@ template prn*(idx: uint16): uint16 =
   when loonyRotate:
     # multiply by cacheLineSize, mod by loonySlotCount
     # then add idx*cacheLineSize/loonySlotCount
-    (idx shl lShiftBits) and (loonySlotCount - 1) or (idx shr rShiftBits)
+    ((idx shl lShiftBits) and uint16(loonySlotCount - 1)) or (idx shr rShiftBits)
   else:
     idx
 
