@@ -99,74 +99,49 @@ proc `=destroy`*[T](x: var LoonyQueueImpl[T]) =
   ## Destroy is completely operated on the basis that no other threads are
   ## operating on the queue at the same time. To not follow this will result in
   ## SIGSEGVs and undefined behaviour.
-  var loadedLine: int # we want to track what cache line we have loaded and
-                      # ensure we perform an atomic load at least once on each cache line
-  var headNodeIdx: (NodePtr, uint16)
-  var tailNode: ptr Node
-  var tailIdx: uint16
-  var slotptr: ptr uint
-  var slotval: uint
-  block:
-
-    template getHead: untyped =
-      let tptr = x.head.load()
-      headNodeIdx = (tptr.nptr, tptr.idx)
-
-    template getTail: untyped =
-      if tailNode.isNil():
-        let tptr = x.tail.load()
-        tailNode = cast[ptr Node](tptr.nptr)
-        tailIdx = tptr.idx
-        loadedLine = cast[int](tailNode)
-      else:
-        let oldNode = tailNode
-        tailNode = cast[ptr Node](tailNode.next.load().nptr())
-        tailIdx = 0'u16
-        deallocNode oldNode
-
-    template loadSlot: untyped =
-      slotptr = cast[ptr uint](tailNode.slots[tailIdx].addr())
-      if (loadedLine + 64) < cast[int](slotptr):
-        slotval = slotptr.atomicLoadN(ATOMIC_RELAXED)
-        loadedLine = cast[int](slotptr)
-      elif not slotptr.isNil():
-        slotval = slotptr[]
-      else:
-        slotval = 0'u
-
-    template truthy: bool =
-      (cast[NodePtr](tailNode), tailIdx) == headNodeIdx
-    template idxTruthy: bool =
-      if cast[NodePtr](tailNode) == headNodeIdx[1]:
-        tailIdx < N
-      else:
-        tailIdx <= headNodeIdx[1]
-
-    getHead()
-    getTail()
-    if (loadedLine mod 64) != 0:
-      loadedLine = loadedLine - (loadedLine mod 64)
-
-    while not truthy:
-      while idxTruthy:
-        loadSlot()
-        if (slotval and spec.WRITER) == spec.WRITER:
-          if (slotval and CONSUMED) == CONSUMED:
-            inc tailIdx
-          elif (slotval and PTRMASK) != 0'u:
-            var el = cast[T](slotval and PTRMASK)
+  
+  # Get current head and tail positions
+  let headTag = x.head.load()
+  let tailTag = x.tail.load()
+  
+  var currNode = cast[ptr Node](headTag.nptr)
+  var currIdx = headTag.idx
+  let endNode = cast[ptr Node](tailTag.nptr)
+  let endIdx = tailTag.idx
+  
+  # Iterate through all nodes from head to tail (following next pointers)
+  while not currNode.isNil:
+    # Determine the end index for this node
+    let stopIdx: uint16 = if currNode == endNode: endIdx else: N.uint16
+    
+    # Process slots from currIdx to stopIdx
+    while currIdx < stopIdx:
+      let slotval = currNode.slots[currIdx].load(moRelaxed)
+      
+      # Check if slot has data (WRITER bit set) and is not consumed
+      if (slotval and spec.WRITER) == spec.WRITER:
+        if (slotval and spec.CONSUMED) != spec.CONSUMED:
+          # Slot has unconsumed data
+          let dataPtr = slotval and PTRMASK
+          if dataPtr != 0:
+            var el = cast[T](dataPtr)
             when T is ref:
-              GC_unref el
-            else:
-              `=destroy`(el)
-            inc tailIdx
-        else:
-          break
-      getTail()
-      if tailNode.isNil():
-        break
-    if not tailNode.isNil():
-      deallocNode(tailNode)
+              # Cast incremented RC, decrement to compensate
+              discard atomicDecRef(el, ATOMIC_RELAXED)
+            # el goes out of scope, ARC decrements and frees
+      inc currIdx
+    
+    # Move to next node (following next pointer towards tail)
+    if currNode == endNode:
+      # We've processed the last node
+      deallocNode(currNode)
+      break
+    else:
+      # Get next node and deallocate current
+      let nextNode = cast[ptr Node](currNode.next.load(moRelaxed))
+      deallocNode(currNode)
+      currNode = nextNode
+      currIdx = 0
 
 #[
   Both enqueue and dequeue enter FAST PATH operations 99% of the time,
@@ -474,3 +449,7 @@ proc newLoonyQueue*[T](): LoonyQueue[T] =
   ## Return an intialized LoonyQueue.
   new result
   initLoonyQueue result
+
+proc maneAndTail*(queue: LoonyQueue): (TagPtr, TagPtr) =
+  ## Get both head and tail TagPtrs atomically
+  result = (queue.fetchHead(), queue.fetchTail())

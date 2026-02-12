@@ -102,6 +102,7 @@ proc prepareElement*[T](el: var T): uint =
       if owners != 0:
         raise AssertionDefect.newException:
           "pushed ref shared by " & $(1 + owners) & " owners"
+    # Don't increment RC here - wasMoved prevents the source from decrementing
   result = cast[uint](el) or WRITER
   wasMoved el
 
