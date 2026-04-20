@@ -115,11 +115,11 @@ jobs:
 
       - name: Tests (gcc)
         run: |
-          balls --path="." --cc:gcc --gc:arc --backend:c --define:danger --define:release
+          balls --path="." --cc:gcc --gc:orc --gc:arc --backend:c --define:danger --define:release
 
       - name: Tests (clang)
         run: |
-          balls --path="." --cc:clang --gc:arc --backend:c --define:danger --define:release
+          balls --path="." --cc:clang --gc:orc --gc:arc --backend:c --define:danger --define:release
 
       - name: Build docs
         if: >

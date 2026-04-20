@@ -175,7 +175,9 @@ proc unsafePop*[T, F](ward: Ward[T, F]): T =
 
 template pauseImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
   when flagset * ward.flags == flagset:
-    if `and`(cast[ptr uint16](ward.values.addr()).atomicFetchOr(flagset, ATOMIC_RELEASE), flagset) > 0'u16:
+    let flagBits = toWardFlags(flagset)
+    let oldBits = cast[ptr uint16](ward.values.addr()).atomicFetchOr(flagBits, ATOMIC_RELEASE)
+    if `and`(oldBits, flagBits) > 0'u16:
       true
     else:
       false
@@ -184,7 +186,8 @@ template pauseImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
       "You require this flag on the ward: " & $flagset
 template resumeImpl*[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
   when flagset * ward.flags == flagset:
-    if `and`(ward.values.fetchAnd(complement flagset, moRelease), flagset) > 0'u16:
+    let flagBits = toWardFlags(flagset)
+    if `and`(ward.values.fetchAnd(not flagBits, moRelease), flagBits) > 0'u16:
       true
     else:
       false
@@ -237,13 +240,14 @@ proc resumePop*[T, F](ward: Ward[T, F]): bool =
   ## Raises an error if the ward flags do not support this operation.
   ward.resumeImpl {PopPausable}
 
-template isImpl[T, F](ward: Ward[T, F], flags: set[WardFlag]): bool =
-  when flags.intersection ward.flags == flags:
-    if `and`(ward.values.load(moRelaxed), flags) == flags:
-      result = true
+template isImpl[T, F](ward: Ward[T, F], flagset: set[WardFlag]): bool =
+  when flagset * ward.flags == flagset:
+    let flagBits = toWardFlags(flagset)
+    let currentBits = ward.values.load(moRelaxed)
+    (currentBits and flagBits) == flagBits
   else:
-    raise ValueError.newException:
-      "You require this flag on the ward: " & $flags
+    {.error: "Ward does not have required flags".}
+    false
 
 proc isPaused*[T, F](ward: Ward[T, F]): bool =
   ## Returns true if BOTH push and pop are paused.
@@ -259,66 +263,58 @@ proc isPushPaused*[T, F](ward: Ward[T, F]): bool =
   ward.isImpl {PushPausable}
 
 proc clearImpl[T](queue: LoonyQueue[T]) =
+  # Save the old head before we swap anything
+  var oldHead = queue.fetchHead()
+  let oldHeadNode = oldHead.nptr
+  
+  # Allocate a new empty node
   var newNode = allocNode()
-  # load the tail
+  
+  # Load the tail
   var currTail = queue.fetchTail()
-  # Load the tails next node
+  
+  # Load the tail's next node - wait for it to be nil
   var tailNext = currTail.node.fetchNext()
-  # New nodes will not have the next node set
-  # If it has been set then the queue is in the process of having
-  # the tail changed and we will continuosly load it until we get the nil next
   while not cast[ptr Node](tailNext).isNil():
     currTail = queue.fetchTail()
     tailNext = currTail.node.fetchNext()
-  # We will replace the tails next node with our newNode. This ensures any ops
-  # that were about to try and set a new node are prevented and will instead
-  # help us to add our new node
+  
+  # Replace the tail's next node with our newNode
   while not currTail.node.compareAndSwapNext(tailNext, newNode):
-    # If it doesnt work then we must have just been beaten to it, load the next
-    # node and swap that instead
     currTail = queue.fetchTail()
-  # TODO I feel that I have to ensure that if I run into the situation where I have
-  # intercepted threads setting new nodes, that memory reclamation occurs as it should
-
-  # Now I will swap the queues current tail with the new tail that we set.
-  # If it doesn't work its probably because another thread did a pop and changed
-  # the index so I will keep increasing the currTail index until it is successful
-  # REVIEW I might just do a store at this point instead of a CAS
+  
+  # Swap the queue's tail to point to newNode
   while not queue.compareAndSwapTail(currTail, newNode):
     currTail += 1
-  # Get the head node
-  var head = queue.fetchHead()
-  # We will try straight up swap the head node with our new node
-  while not queue.compareAndSwapHead(head, newNode):
-    # Keep updating the head node till it works
-    head = queue.fetchHead()
-    # TODO will have to do a check here to see if the head is
-    # the same as our newNode in which case can just stop
-
-  # Now we can begin clearing the nodes
-  block done:
-    while true:
-      # Check if the head is the same as our newNode in which
-      # case we have already cleared all the previous nodes and
-      # deallocated them
-      if head.nptr == newNode.nptr:
-        break done
-      for i in 0..<N:
-        # For every slot in the heads slot, load the value
-        var slot = head.node.slots[i].load(moRelaxed)
-        # If the slot has been consumed then we will move on (its already been derefd)
-        if not (slot and CONSUMED):
-          # Slot hasnt been consumed so we will load it
-          var el = cast[T](slot and SLOTMASK)
-          # If slot is not a nil ref then we will unref it
+  
+  # Swap the queue's head to point to newNode
+  var headTag = queue.fetchHead()
+  while not queue.compareAndSwapHead(headTag, newNode):
+    headTag = queue.fetchHead()
+  
+  # Now clear the old nodes starting from oldHeadNode
+  var currNode = cast[ptr Node](oldHeadNode)
+  let endNode = newNode
+  
+  while currNode != endNode and not currNode.isNil:
+    # Process all slots in this node
+    for i in 0..<N:
+      let slot = currNode.slots[i].load(moRelaxed)
+      
+      # Only process slots that have not been consumed
+      if not (slot and CONSUMED):
+        let dataPtr = slot and SLOTMASK
+        if dataPtr != 0:
+          var el = cast[T](dataPtr)
           when T is ref:
             if not el.isNil:
               GC_unref el
-      # After unrefing the slots, we will load the next node in the list
-      var dehead = deepCopy(head)
-      head = head.node.fetchNext()
-      # Deallocate the consumed node
-      deallocNode(dehead.nptr)
+          # el goes out of scope, ARC handles destruction
+    
+    # Get next node before deallocating current
+    let nextNode = currNode.next.load(moRelaxed)
+    deallocNode(currNode)
+    currNode = cast[ptr Node](nextNode)
 
   # and now hopefully  nothing bad happens.
 
@@ -346,9 +342,9 @@ proc countImpl[T](queue: LoonyQueue[T]): int =
   var (currHead, currTail) = queue.maneAndTail()
   if not currHead.nptr == head.nptr:
     dec nodes
-  result = nodes * N + (N - currHead.idx) + currTail.idx
+  result = nodes * N + (N - int(currHead.idx)) + int(currTail.idx)
 
-proc count*[T, F](ward: Ward[T, F]) =
+proc count*[T, F](ward: Ward[T, F]): int =
   ## Does as labelled on the bottle. The nature of loony queue means that the returned
   ## value is not 100% accurate when there is high contention/activity on the queue.
-  countImpl ward.queue
+  result = countImpl(ward.queue)

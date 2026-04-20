@@ -54,7 +54,7 @@ After adapting the algorithm to nim CPS, disruptek adapted the queue for **any r
 With the 11 bit aligned implementation we have:
 - Lock-free consumption up to **512** threads
 - Lock-free production up to **1,025** threads
-- Memory-leak free under **ARC**
+- Memory-leak free under ARC and ORC
 - Can pass ANY ref object between threads; however:
   - Is perfectly designed for passing Continuations between threads
 - **0 memory copies**
@@ -74,7 +74,7 @@ Download with `nimble install loony` (CPS dependency for tests) or directly from
 
 Simple.
 
-First, ensure you compile with arc and threads (`--gc:arc --threads:on`)
+First, ensure you compile with arc or orc and threads (`--threads:on`)
 
 Then:
 ```nim

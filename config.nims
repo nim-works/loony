@@ -20,9 +20,6 @@ switch("define", "nimPreviewFloatRoundtrip")
 #switch("define", "traceCollector")
 #switch("define", "nimArcIds")
 
-# may as well leave this on since it doesn't work in refc
-switch("gc", "arc")
-
 # default to enable debugging for now
 switch("define", "loonyDebug")
 # Now that I've added a counter for node allocations should this be disabled
